@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/uniseg"
 
 	"github.com/demongiggle/cogito/internal/protocol"
 )
@@ -11,6 +12,9 @@ import (
 const (
 	doubleClickInterval = 500 * time.Millisecond
 	doubleClickSlop     = 2
+	// caretBlinkInterval is the half-cycle of the client-owned software
+	// caret. It is deliberately independent of pane output and frame rate.
+	caretBlinkInterval = 500 * time.Millisecond
 )
 
 // paneClick records a completed or pending click on a pane hit target.
@@ -30,6 +34,19 @@ type attach struct {
 	frameRows  int
 
 	frame protocol.Frame // last frame, for mouse hit-testing
+
+	// grid holds the unadorned server frame. The caret is painted over it
+	// locally, so the host terminal's hardware cursor is never used.
+	grid          []protocol.Cell
+	gridCols      int
+	gridRows      int
+	caretX        int
+	caretY        int
+	caretVisible  bool
+	caretBlinkOff bool // zero value means the software caret is lit
+	caretDrawn    bool
+	drawnCaretX   int
+	drawnCaretY   int
 
 	dragging     bool
 	dragID       int
@@ -77,28 +94,147 @@ func styleOf(c protocol.Cell) tcell.Style {
 	return s
 }
 
+func blankClientCell(row, col int) protocol.Cell {
+	return protocol.Cell{Row: row, Col: col, Ch: ' ', FG: protocol.ColorDefault, BG: protocol.ColorDefault}
+}
+
+func cellRune(ch rune) rune {
+	if ch == 0 {
+		return ' '
+	}
+	return ch
+}
+
+func wideCell(ch rune) bool {
+	return uniseg.StringWidth(string(cellRune(ch))) == 2
+}
+
+func (a *attach) resetGrid(cols, rows int) {
+	a.gridCols, a.gridRows = cols, rows
+	a.grid = make([]protocol.Cell, cols*rows)
+	for y := 0; y < rows; y++ {
+		for x := 0; x < cols; x++ {
+			a.grid[y*cols+x] = blankClientCell(y, x)
+		}
+	}
+	a.caretDrawn = false
+}
+
+// ensureGrid rebuilds the local copy after a full frame or a size change.
+// It reports whether the baseline was rebuilt, so an incremental frame
+// that arrives without a usable local grid can clear stale screen contents.
+func (a *attach) ensureGrid(f protocol.Frame) bool {
+	cols, rows := a.frameCols, a.frameRows
+	if cols <= 0 || rows <= 0 {
+		a.grid, a.gridCols, a.gridRows = nil, 0, 0
+		a.caretDrawn = false
+		return false
+	}
+	if !f.Full && a.gridCols == cols && a.gridRows == rows && len(a.grid) == cols*rows {
+		return false
+	}
+	a.resetGrid(cols, rows)
+	return true
+}
+
+func (a *attach) inGrid(x, y int) bool {
+	return x >= 0 && y >= 0 && x < a.gridCols && y < a.gridRows
+}
+
+func (a *attach) setScreenCell(c protocol.Cell) {
+	if !a.inGrid(c.Col, c.Row) {
+		return
+	}
+	a.screen.SetContent(c.Col, c.Row, cellRune(c.Ch), nil, styleOf(c))
+}
+
+// paintCell restores one unadorned cell, including the trailing cell that
+// tcell may reserve when the rune is double-width.
+func (a *attach) paintCell(x, y int) {
+	if !a.inGrid(x, y) {
+		return
+	}
+	c := a.grid[y*a.gridCols+x]
+	c.Row, c.Col = y, x
+	a.setScreenCell(c)
+	if wideCell(c.Ch) && x+1 < a.gridCols {
+		next := a.grid[y*a.gridCols+x+1]
+		next.Row, next.Col = y, x+1
+		a.setScreenCell(next)
+	}
+}
+
+func (a *attach) clearCaret() {
+	if !a.caretDrawn {
+		return
+	}
+	a.paintCell(a.drawnCaretX, a.drawnCaretY)
+	a.caretDrawn = false
+}
+
+func (a *attach) drawCaret() {
+	if a.caretDrawn || !a.caretVisible || a.caretBlinkOff {
+		return
+	}
+	x, y := a.caretX, a.caretY
+	if !a.inGrid(x, y) {
+		return
+	}
+	c := a.grid[y*a.gridCols+x]
+	c.Row, c.Col = y, x
+	// Invert the cell's displayed colors regardless of whether the pane
+	// already marked it reverse-video. Clearing text blink keeps the caret's
+	// on phase steady; the underlying cell regains blink on the off phase.
+	c.Style = (c.Style &^ protocol.StyleBlink) ^ protocol.StyleReverse
+	a.setScreenCell(c)
+	if wideCell(c.Ch) && x+1 < a.gridCols {
+		next := a.grid[y*a.gridCols+x+1]
+		next.Row, next.Col = y, x+1
+		a.setScreenCell(next)
+	}
+	a.caretDrawn = true
+	a.drawnCaretX, a.drawnCaretY = x, y
+}
+
+func (a *attach) refreshCaret() {
+	a.clearCaret()
+	a.drawCaret()
+}
+
+// blinkCaret advances the software caret's fixed-rate phase. Its return
+// value reports whether a visible cell repaint should be flushed.
+func (a *attach) blinkCaret() bool {
+	a.caretBlinkOff = !a.caretBlinkOff
+	a.refreshCaret()
+	return a.caretVisible
+}
+
 func (a *attach) applyFrame(f protocol.Frame) {
 	if f.Cols > 0 && f.Rows > 0 {
 		a.frameCols, a.frameRows = f.Cols, f.Rows
 	}
+	// Keep the host cursor hidden. tcell hides and restores the cursor on
+	// every Show(), which would otherwise make its blink follow frame rate.
+	a.screen.HideCursor()
+	cleared := false
 	if f.Full {
+		a.screen.Clear()
+		cleared = true
+	}
+	if a.ensureGrid(f) && !cleared {
 		a.screen.Clear()
 	}
 	for _, c := range f.Cells {
-		if c.Row < 0 || c.Col < 0 {
+		if !a.inGrid(c.Col, c.Row) {
 			continue
 		}
-		ch := c.Ch
-		if ch == 0 {
-			ch = ' '
-		}
-		a.screen.SetContent(c.Col, c.Row, ch, nil, styleOf(c))
+		a.grid[c.Row*a.gridCols+c.Col] = c
+		a.setScreenCell(c)
 	}
-	if f.CursorVisible {
-		a.screen.ShowCursor(f.CursorX, f.CursorY)
-	} else {
-		a.screen.HideCursor()
-	}
+	a.clearCaret()
+	a.caretVisible = f.CursorVisible
+	a.caretX, a.caretY = f.CursorX, f.CursorY
+	a.drawCaret()
 	a.frame = f
 }
 

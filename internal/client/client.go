@@ -48,6 +48,9 @@ func Attach(socketPath string) error {
 		return fmt.Errorf("cogito: init screen: %w", err)
 	}
 	screen.EnableMouse()
+	// The caret is a software-rendered cell; hiding the host cursor keeps
+	// tcell's per-redraw cursor handling from affecting its blink rate.
+	screen.HideCursor()
 	// Note: no EnablePaste. Pasted bytes arrive as ordinary key input and are
 	// forwarded to the pane, matching how tcell delivers them unencoded.
 	screen.Clear()
@@ -106,6 +109,9 @@ func Attach(socketPath string) error {
 		frameRows: welcome.Rows,
 	}
 
+	caretTicker := time.NewTicker(caretBlinkInterval)
+	defer caretTicker.Stop()
+
 	reason := ""
 	for reason == "" {
 		select {
@@ -127,6 +133,10 @@ func Attach(socketPath string) error {
 				screen.Beep()
 			case protocol.Goodbye:
 				reason = m.Reason
+			}
+		case <-caretTicker.C:
+			if c.blinkCaret() {
+				screen.Show()
 			}
 		case ev := <-events:
 			switch ev := ev.(type) {
