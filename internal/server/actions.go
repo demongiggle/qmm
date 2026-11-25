@@ -13,9 +13,20 @@ const prefixTimeout = 2 * time.Second
 const prefixByte = 0x01
 
 // handleClientMessage dispatches one client message. It returns true when the
-// server should shut down (cogito kill-server).
+// server should shut down (confirmed prefix+&, cogito kill-server, or a
+// session-ending pane exit).
 func (s *Server) handleClientMessage(in clientMsg) bool {
 	c := in.cli
+	// While the shutdown dialog is open, only lifecycle and input messages
+	// are handled. Mouse/action messages are swallowed rather than changing
+	// the session underneath the pending decision.
+	if c.confirmOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			return false
+		}
+	}
 	// While help is open, mouse/action messages dismiss the overlay instead
 	// of reaching the panes underneath. Input and control messages are
 	// handled below.
@@ -29,11 +40,7 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 	}
 	switch msg := in.msg.(type) {
 	case protocol.Input:
-		if c.helpOpen {
-			s.handleHelpInput(c, msg.Data)
-		} else {
-			s.handleInput(c, msg.Data)
-		}
+		s.handleInput(c, msg.Data)
 	case protocol.Resize:
 		cols, rows := msg.Cols, msg.Rows
 		if cols < 1 {
@@ -51,7 +58,7 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 	case protocol.Detach:
 		s.detachClient(c, "detached")
 	case protocol.Shutdown:
-		s.teardown("session ended")
+		s.requestShutdown()
 		return true
 	case protocol.ActionFocus:
 		s.focusAt(msg.X, msg.Y)
@@ -91,7 +98,7 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			}
 		}
 	}
-	return false
+	return s.shutdownRequested
 }
 
 // forceKillPane is an internal message used to escalate a kill after a timeout.
@@ -314,6 +321,9 @@ var prefixBindings = []prefixBinding{
 	{"n", func(s *Server, c *clientConn) { s.cycleWindow(1) }},
 	{"p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }},
 	{"x", func(s *Server, c *clientConn) { s.killActivePane() }},
+	// tmux uses prefix+& for a confirmed destructive close. cogito has one
+	// session, so the chord asks before shutting down the whole server.
+	{"&", func(s *Server, c *clientConn) { s.openShutdownConfirm(c) }},
 	{"o", func(s *Server, c *clientConn) { s.cyclePane() }},
 	{"z", func(s *Server, c *clientConn) { s.toggleZoom() }},
 	{"d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }},
@@ -339,6 +349,14 @@ func (s *Server) writeRaw(c *clientConn, data []byte) {
 }
 
 func (s *Server) handleInput(c *clientConn, data []byte) {
+	if c.confirmOpen {
+		s.handleShutdownConfirmInput(c, data)
+		return
+	}
+	if c.helpOpen {
+		s.handleHelpInput(c, data)
+		return
+	}
 	var pending bytes.Buffer
 	flush := func() {
 		if pending.Len() == 0 {

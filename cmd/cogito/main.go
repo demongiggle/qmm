@@ -70,6 +70,7 @@ Inside cogito, press Ctrl-a to send a command prefix, followed by:
   c         new window
   n / p     next / previous window
   x         kill current pane
+  &         shut down session (confirm with y, cancel with n/Esc)
   o         cycle to next pane
   z         toggle zoom of current pane (fills the area, 1-cell margin)
   Ctrl-← →  resize pane in direction  (also: Ctrl-↑ Ctrl-↓)

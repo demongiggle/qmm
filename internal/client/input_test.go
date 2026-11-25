@@ -20,6 +20,7 @@ func TestEncodeKey(t *testing.T) {
 		{"rune", key('a', tcell.KeyRune, tcell.ModNone), []byte("a")},
 		{"utf8 rune", key('€', tcell.KeyRune, tcell.ModNone), []byte("€")},
 		{"shifted pipe", key('|', tcell.KeyRune, tcell.ModShift), []byte("|")},
+		{"shifted ampersand", key('&', tcell.KeyRune, tcell.ModShift), []byte("&")},
 		{"hyphen", key('-', tcell.KeyRune, tcell.ModNone), []byte("-")},
 		{"ctrl-a (KeyRune)", key('a', tcell.KeyRune, tcell.ModCtrl), []byte{0x01}},
 		{"ctrl-a (KeyCtrlA)", key(0, tcell.KeyCtrlA, tcell.ModCtrl), []byte{0x01}},

@@ -50,6 +50,7 @@ var helpSections = []helpSection{
 	{
 		Title: "Session",
 		Items: []helpItem{
+			{"C-a &", "Kill session (y/n)"},
 			{"C-a d", "Detach"},
 			{"C-a C-a", "Send literal ^A"},
 			{"C-a ?", "Show this help"},

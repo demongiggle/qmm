@@ -24,6 +24,8 @@ detach/attach — nothing else yet.
 - **Color**: pane output keeps ANSI 16/256-color and 24-bit RGB styling;
   active pane borders, window tabs, and the help overlay are color-coded
 - **Interactive help** (`prefix` `?`): categorized, color-coded key cheatsheet
+- **Confirmed shutdown** (`prefix` `&`): a modal y/n dialog before ending the
+  session and all its panes
 - Windows are auto-named after the foreground process
 - Multiple clients may attach to the same session; the effective size is the
   smallest attached terminal (tmux-style)
@@ -78,6 +80,7 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `n` / `p`| Next / previous window              |
 | `prefix` `o`      | Cycle to next pane                  |
 | `prefix` `x`      | Kill current pane                   |
+| `prefix` `&`      | Shut down session (confirm)          |
 | `prefix` `z`      | Toggle zoom of current pane         |
 | `prefix` `d`      | Detach (session keeps running)      |
 | `prefix` `Ctrl-←/→/↑/↓` | Resize pane                    |
@@ -86,6 +89,12 @@ Server logs are written to `server.log` next to the socket.
 
 The split keys match the divider they draw: `|` separates left/right panes,
 `-` separates top/bottom panes.
+
+Like tmux's destructive `&` chord, `prefix` `&` opens a modal confirmation
+dialog before ending cogito's single session. Press `y` (or Enter) to shut
+down every window and pane; `n`, `q`, `Esc`, or `Ctrl-c` cancels. Other keys
+are swallowed while the dialog is open. The dialog is local to the attached
+client; `cogito kill-server` still shuts down immediately without a prompt.
 
 Press `prefix` `?` for a color-coded cheatsheet of pane, window, layout,
 session, and mouse commands. On short terminals, use `↑` / `↓`, `PgUp` / `PgDn`,
@@ -97,7 +106,7 @@ switch; drag a border between panes to resize it. The mouse wheel scrolls
 nothing (scrollback is not implemented yet).
 
 When the shell in the last pane of the last window exits, the session ends
-and attached clients exit with it.
+and attached clients exit with it; this shell-driven exit is not prompted.
 
 ## Architecture
 
@@ -152,6 +161,7 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] `Ctrl-a c` opens and focuses a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates
 - [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
+- [ ] `Ctrl-a &` opens shutdown confirmation; `n` / `Esc` cancels; `y` ends the server
 - [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes the pane
 - [ ] kill the pane (`Ctrl-a x`): window closes; killing the last pane quits everything
 - [ ] `cogito kill-server` from another terminal shuts the session down

@@ -40,6 +40,13 @@ const (
 	colHelpKeyBG    = 238
 	colHelpFG       = 252
 	colHelpMuted    = 244
+
+	colConfirmBackdrop = colHelpBackdrop
+	colConfirmPanelBG  = colHelpPanelBG
+	colConfirmBorder   = colTooSmall
+	colConfirmTitle    = colTooSmall
+	colConfirmFG       = colHelpFG
+	colConfirmMuted    = colHelpMuted
 )
 
 // compositor turns session state into protocol frames and diffs successive
@@ -51,6 +58,8 @@ type compositor struct {
 
 	helpOpen bool
 	helpTop  int
+
+	confirmOpen bool
 }
 
 func blankCell(row, col int) protocol.Cell {
@@ -73,7 +82,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 
 	frame := protocol.Frame{Cols: cols, Rows: rows}
 	render := func() protocol.Frame {
-		if c.helpOpen {
+		if c.confirmOpen {
+			c.drawShutdownConfirm(&frame, setCell, cols, rows)
+		} else if c.helpOpen {
 			c.drawHelp(&frame, setCell, cols, rows)
 		}
 		return c.diff(cells, forceFull, frame)

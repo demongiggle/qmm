@@ -67,6 +67,10 @@ type Server struct {
 
 	needFull bool
 	comp     compositor
+
+	// shutdownRequested is set by the confirmed prefix+& chord; Run performs
+	// the actual teardown after the current message is handled.
+	shutdownRequested bool
 }
 
 type clientMsg struct {
@@ -97,14 +101,17 @@ type clientConn struct {
 	helpTop   int
 	forceFull bool
 
+	// Shutdown confirmation is local to the client that pressed prefix+&.
+	confirmOpen bool
+
 	// Prefix-key state machine.
 	prefixArmed bool
 	prefixAt    time.Time
 	prefixBuf   []byte
 }
 
-// Run starts the server and blocks until shutdown (session ended via
-// cogito kill-server or the last pane exiting).
+// Run starts the server and blocks until shutdown (prefix+&, cogito
+// kill-server, or the last pane exiting).
 func Run(cfg Config) error {
 	s := &Server{
 		cfg:       cfg,
@@ -186,12 +193,12 @@ func Run(cfg Config) error {
 			s.broadcast()
 		case <-s.shutdown:
 			shutdown = true
-			s.teardown("session ended")
 		case <-ticker.C:
 			s.refreshWindowNames()
 			s.broadcast()
 		}
 		if shutdown {
+			s.teardown("session ended")
 			return nil
 		}
 	}
@@ -401,6 +408,7 @@ func (s *Server) broadcast() {
 	for c := range s.clients {
 		c.comp.helpOpen = c.helpOpen
 		c.comp.helpTop = c.helpTop
+		c.comp.confirmOpen = c.confirmOpen
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
 		c.forceFull = false
 		c.helpTop = c.comp.helpTop
@@ -467,7 +475,7 @@ func (s *Server) handlePaneExit(paneID int) bool {
 	if target.tree.Len() == 0 {
 		delete(s.sess.windows, targetIdx)
 		if len(s.sess.windows) == 0 {
-			s.teardown("session ended")
+			s.requestShutdown()
 			return true
 		}
 		// Activate the lowest-indexed remaining window.
