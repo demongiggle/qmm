@@ -82,6 +82,9 @@ func (s *session) lowestFreeIndex() int {
 
 // fgInfo inspects the foreground process group of the pane's PTY and returns
 // its command name and working directory (best effort; both may be empty).
+// Note: pgid from TCGETPGRP equals the process group leader's pid; if that
+// leader has exited but the group lives on, /proc/<pgid> lookups fail and we
+// fall back to "" (the window keeps its previous name).
 func fgInfo(p *pane) (name, cwd string) {
 	fd := p.ptmx.Fd()
 	pgid, err := tcgetpgrp(fd)
@@ -114,6 +117,9 @@ func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
 		shell = "/bin/sh"
 	}
 	cmd := exec.Command(shell, "-l")
+	// Be explicit: the child gets its own session and controlling tty so a
+	// process-group kill aimed at a pane can never hit our own group.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 	if dir != "" {
 		if st, err := os.Stat(dir); err == nil && st.IsDir() {
@@ -177,11 +183,14 @@ func (p *pane) readLoop(exitCh chan int) {
 }
 
 // kill sends SIGHUP to the pane's foreground process group (like a terminal
-// hangup) and closes the master side of the PTY.
+// hangup) and closes the master side of the PTY. Falls back to signalling the
+// direct child if the group signal fails.
 func (p *pane) kill() {
 	if p.cmd != nil && p.cmd.Process != nil {
 		// The child is a session leader (Setsid), so pgid == pid.
-		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGHUP)
+		if err := syscall.Kill(-p.cmd.Process.Pid, syscall.SIGHUP); err != nil {
+			_ = syscall.Kill(p.cmd.Process.Pid, syscall.SIGHUP)
+		}
 	}
 	_ = p.ptmx.Close()
 }
