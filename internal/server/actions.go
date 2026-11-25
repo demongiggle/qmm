@@ -9,8 +9,15 @@ import (
 	"github.com/demongiggle/cogito/internal/protocol"
 )
 
-const prefixTimeout = 2 * time.Second
-const prefixByte = 0x01
+const (
+	prefixTimeout = 2 * time.Second
+	// repeatTimeout is the tmux-style window in which a repeatable binding
+	// can be fired again without pressing the prefix. It is long enough for
+	// terminal key auto-repeat, but short enough to return Ctrl-arrow to the
+	// pane soon after the user releases the chord.
+	repeatTimeout = 500 * time.Millisecond
+	prefixByte    = 0x01
+)
 
 // handleClientMessage dispatches one client message. It returns true when the
 // server should shut down (confirmed prefix+&, cogito kill-server, or a
@@ -338,36 +345,52 @@ func (s *Server) dragUpdate(c *clientConn, splitterID, delta int) {
 // --- input byte stream and prefix machine ---------------------------------
 
 type prefixBinding struct {
-	seq string
-	act func(s *Server, c *clientConn)
+	seq    string
+	act    func(s *Server, c *clientConn)
+	repeat bool
+}
+
+func prefixBind(seq string, act func(s *Server, c *clientConn)) prefixBinding {
+	return prefixBinding{seq: seq, act: act}
+}
+
+func repeatableBind(seq string, act func(s *Server, c *clientConn)) prefixBinding {
+	return prefixBinding{seq: seq, act: act, repeat: true}
+}
+
+func repeatableResizeBind(seq string, direction uint8) prefixBinding {
+	return repeatableBind(seq, func(s *Server, _ *clientConn) {
+		s.resizePane(direction, 2)
+	})
 }
 
 // Split keys mirror the divider they create: "|" puts a vertical divider
 // between left/right panes, "-" a horizontal divider between top/bottom ones.
 var prefixBindings = []prefixBinding{
-	{"|", func(s *Server, c *clientConn) { s.splitActive(layout.Vertical) }},
-	{"-", func(s *Server, c *clientConn) { s.splitActive(layout.Horizontal) }},
-	{"c", func(s *Server, c *clientConn) { s.newWindow() }},
-	{"n", func(s *Server, c *clientConn) { s.cycleWindow(1) }},
-	{"p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }},
-	{"x", func(s *Server, c *clientConn) { s.killActivePane() }},
+	prefixBind("|", func(s *Server, c *clientConn) { s.splitActive(layout.Vertical) }),
+	prefixBind("-", func(s *Server, c *clientConn) { s.splitActive(layout.Horizontal) }),
+	prefixBind("c", func(s *Server, c *clientConn) { s.newWindow() }),
+	prefixBind("n", func(s *Server, c *clientConn) { s.cycleWindow(1) }),
+	prefixBind("p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }),
+	prefixBind("x", func(s *Server, c *clientConn) { s.killActivePane() }),
 	// tmux uses prefix+& for a confirmed destructive close. cogito has one
 	// session, so the chord asks before shutting down the whole server.
-	{"&", func(s *Server, c *clientConn) { s.openShutdownConfirm(c) }},
-	{"o", func(s *Server, c *clientConn) { s.cyclePane() }},
-	{"z", func(s *Server, c *clientConn) { s.toggleZoom() }},
-	{"d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }},
-	{"?", func(s *Server, c *clientConn) { s.toggleHelp(c) }},
-	{"\x01", func(s *Server, c *clientConn) { s.writeRaw(c, []byte{0x01}) }},
-	// Ctrl+Arrow (xterm encoding 1;5, rxvt-style 5).
-	{"\x1b[1;5A", func(s *Server, c *clientConn) { s.resizePane(protocol.DirUp, 2) }},
-	{"\x1b[1;5B", func(s *Server, c *clientConn) { s.resizePane(protocol.DirDown, 2) }},
-	{"\x1b[1;5C", func(s *Server, c *clientConn) { s.resizePane(protocol.DirRight, 2) }},
-	{"\x1b[1;5D", func(s *Server, c *clientConn) { s.resizePane(protocol.DirLeft, 2) }},
-	{"\x1b[5A", func(s *Server, c *clientConn) { s.resizePane(protocol.DirUp, 2) }},
-	{"\x1b[5B", func(s *Server, c *clientConn) { s.resizePane(protocol.DirDown, 2) }},
-	{"\x1b[5C", func(s *Server, c *clientConn) { s.resizePane(protocol.DirRight, 2) }},
-	{"\x1b[5D", func(s *Server, c *clientConn) { s.resizePane(protocol.DirLeft, 2) }},
+	prefixBind("&", func(s *Server, c *clientConn) { s.openShutdownConfirm(c) }),
+	prefixBind("o", func(s *Server, c *clientConn) { s.cyclePane() }),
+	prefixBind("z", func(s *Server, c *clientConn) { s.toggleZoom() }),
+	prefixBind("d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }),
+	prefixBind("?", func(s *Server, c *clientConn) { s.toggleHelp(c) }),
+	prefixBind("\x01", func(s *Server, c *clientConn) { s.writeRaw(c, []byte{0x01}) }),
+	// Ctrl+Arrow (xterm encoding 1;5, rxvt-style 5). These are repeatable so
+	// holding Ctrl and pressing an arrow again resizes without another prefix.
+	repeatableResizeBind("\x1b[1;5A", protocol.DirUp),
+	repeatableResizeBind("\x1b[1;5B", protocol.DirDown),
+	repeatableResizeBind("\x1b[1;5C", protocol.DirRight),
+	repeatableResizeBind("\x1b[1;5D", protocol.DirLeft),
+	repeatableResizeBind("\x1b[5A", protocol.DirUp),
+	repeatableResizeBind("\x1b[5B", protocol.DirDown),
+	repeatableResizeBind("\x1b[5C", protocol.DirRight),
+	repeatableResizeBind("\x1b[5D", protocol.DirLeft),
 }
 
 func (s *Server) writeRaw(c *clientConn, data []byte) {
@@ -380,12 +403,17 @@ func (s *Server) writeRaw(c *clientConn, data []byte) {
 
 func (s *Server) handleInput(c *clientConn, data []byte) {
 	if c.confirmOpen {
+		c.clearRepeat()
 		s.handleShutdownConfirmInput(c, data)
 		return
 	}
 	if c.helpOpen {
+		c.clearRepeat()
 		s.handleHelpInput(c, data)
 		return
+	}
+	if c.repeatExpired() {
+		c.clearRepeat()
 	}
 	var pending bytes.Buffer
 	flush := func() {
@@ -414,6 +442,7 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 				case isPrefixOfBinding(seq):
 					// wait for more bytes
 				default:
+					c.clearRepeat()
 					c.enqueue(protocol.Notice{Text: "cogito: unbound prefix key"})
 					c.prefixArmed = false
 					c.prefixBuf = nil
@@ -421,8 +450,31 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 				continue
 			}
 		}
+		if c.repeatArmed {
+			seq := repeatableBindingAt(data[i:])
+			switch {
+			case c.repeatExpired():
+				c.clearRepeat()
+			case seq != "":
+				flush()
+				fireBinding(s, c, seq)
+				i += len(seq) - 1
+				continue
+			case b != prefixByte && isPrefixOfRepeatableBinding(data[i:]):
+				// A partial escape sequence is ordinary pane input. Client
+				// key events arrive as one complete sequence per message.
+				_, _ = pending.Write(data[i:])
+				c.clearRepeat()
+				i = len(data)
+				continue
+			default:
+				// A new prefix or any other key leaves repeat mode.
+				c.clearRepeat()
+			}
+		}
 		if b == prefixByte {
 			flush()
+			c.clearRepeat()
 			c.prefixArmed = true
 			c.prefixAt = time.Now()
 			c.prefixBuf = c.prefixBuf[:0]
@@ -431,6 +483,40 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 		_ = pending.WriteByte(b)
 	}
 	flush()
+}
+
+// repeatableBindingAt returns the longest repeatable sequence starting at
+// data. An empty string means no repeatable key begins there.
+func repeatableBindingAt(data []byte) string {
+	longest := ""
+	for _, b := range prefixBindings {
+		if !b.repeat || len(b.seq) > len(data) || len(b.seq) <= len(longest) {
+			continue
+		}
+		if string(data[:len(b.seq)]) == b.seq {
+			longest = b.seq
+		}
+	}
+	return longest
+}
+
+func isPrefixOfRepeatableBinding(data []byte) bool {
+	seq := string(data)
+	for _, b := range prefixBindings {
+		if b.repeat && strings.HasPrefix(b.seq, seq) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *clientConn) repeatExpired() bool {
+	return c.repeatArmed && time.Since(c.repeatAt) > repeatTimeout
+}
+
+func (c *clientConn) clearRepeat() {
+	c.repeatArmed = false
+	c.repeatAt = time.Time{}
 }
 
 func isExactBinding(seq string) bool {
@@ -455,6 +541,12 @@ func fireBinding(s *Server, c *clientConn, seq string) {
 	for _, b := range prefixBindings {
 		if b.seq == seq {
 			b.act(s, c)
+			if b.repeat {
+				c.repeatArmed = true
+				c.repeatAt = time.Now()
+			} else {
+				c.clearRepeat()
+			}
 			return
 		}
 	}

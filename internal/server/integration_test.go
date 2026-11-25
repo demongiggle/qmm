@@ -516,8 +516,9 @@ func TestNewPaneAndWindowTakeFocus(t *testing.T) {
 	}
 }
 
-// TestPrefixArrowResize verifies the Ctrl-a Ctrl-Right key sequence resizes
-// the active pane end to end (byte -> prefix state machine -> tree resize).
+// TestPrefixArrowResize verifies that Ctrl-a Ctrl-Right resizes the active
+// pane end to end, and that held Ctrl-Right presses repeat without a prefix
+// (byte -> prefix state machine -> tree resize).
 func TestPrefixArrowResize(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
@@ -536,20 +537,25 @@ func TestPrefixArrowResize(t *testing.T) {
 	f := c.waitForFrame(func(f protocol.Frame) bool { return len(f.Splitters) == 1 })
 	startX := f.Splitters[0].X
 
-	// Ctrl-a Ctrl-Right (xterm encoding for Ctrl+RightArrow).
+	// Ctrl-a Ctrl-Right (xterm encoding for Ctrl+RightArrow), followed by
+	// two more Ctrl-Right presses without another prefix while the repeat
+	// window is active. Sending them back to back avoids timing dependence.
 	if err := c.codec.Send(protocol.Input{Data: []byte("\x01\x1b[1;5C")}); err != nil {
 		t.Fatalf("input: %v", err)
 	}
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x1b[1;5C\x1b[1;5C")}); err != nil {
+		t.Fatalf("repeat input: %v", err)
+	}
 	c.waitForFrame(func(f protocol.Frame) bool {
-		return len(f.Splitters) == 1 && f.Splitters[0].X == startX+2
+		return len(f.Splitters) == 1 && f.Splitters[0].X == startX+6
 	})
 
-	// Ctrl-a Ctrl-Left moves it back.
+	// Ctrl-a Ctrl-Left moves it back one step, even from the repeat window.
 	if err := c.codec.Send(protocol.Input{Data: []byte("\x01\x1b[1;5D")}); err != nil {
 		t.Fatalf("input: %v", err)
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
-		return len(f.Splitters) == 1 && f.Splitters[0].X == startX
+		return len(f.Splitters) == 1 && f.Splitters[0].X == startX+4
 	})
 
 	if err := c.codec.Send(protocol.Shutdown{}); err != nil {

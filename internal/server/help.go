@@ -44,7 +44,7 @@ var helpSections = []helpSection{
 		Title: "Layout",
 		Items: []helpItem{
 			{"C-a z", "Floating zoom"},
-			{"C-a C-←/→/↑/↓", "Resize pane"},
+			{"C-a C-←/→/↑/↓", "Resize pane (repeat)"},
 		},
 	},
 	{
@@ -95,6 +95,7 @@ func (s *Server) openHelp(c *clientConn) {
 	c.helpOpen = true
 	c.helpTop = 0
 	c.forceFull = true
+	c.clearRepeat()
 	s.broadcast()
 }
 
@@ -105,6 +106,7 @@ func (s *Server) closeHelp(c *clientConn) {
 	c.helpOpen = false
 	c.helpTop = 0
 	c.forceFull = true
+	c.clearRepeat()
 	s.broadcast()
 }
 

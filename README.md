@@ -84,12 +84,18 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `&`      | Shut down session (confirm)          |
 | `prefix` `z`      | Toggle floating pane zoom           |
 | `prefix` `d`      | Detach (session keeps running)      |
-| `prefix` `Ctrl-←/→/↑/↓` | Resize pane                    |
+| `prefix` `Ctrl-←/→/↑/↓` | Resize pane (repeatable)       |
 | `prefix` `Ctrl-a` | Send a literal `Ctrl-a` to the app  |
 | `prefix` `?`      | Show categorized key help           |
 
 The split keys match the divider they draw: `|` separates left/right panes,
 `-` separates top/bottom panes.
+
+The Ctrl-arrow resize keys are repeatable: after `prefix` `Ctrl-→`, keep Ctrl
+held and press an arrow again within half a second to resize another step
+without another prefix. A different Ctrl-arrow works in the same repeat
+window; any other key, a new prefix, or the timeout ends it and returns
+Ctrl-arrow input to the pane.
 
 Like tmux's destructive `&` chord, `prefix` `&` opens a modal confirmation
 dialog before ending cogito's single session. Press `y` (or Enter) to shut
@@ -166,7 +172,7 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
 - [ ] `Ctrl-a &` opens shutdown confirmation; `n` / `Esc` cancels; `y` ends the server
-- [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes the pane
+- [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes; holding Ctrl and repeating the arrow resizes without another prefix
 - [ ] kill the pane (`Ctrl-a x`): window closes; killing the last pane quits everything
 - [ ] `cogito kill-server` from another terminal shuts the session down
 - [ ] two attached clients: the smaller terminal wins (min-size); closing it grows the other to full size

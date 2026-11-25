@@ -108,6 +108,11 @@ type clientConn struct {
 	prefixArmed bool
 	prefixAt    time.Time
 	prefixBuf   []byte
+
+	// Repeatable bindings stay active for a short window, allowing held
+	// Ctrl-arrow keys to resize without pressing the prefix again.
+	repeatArmed bool
+	repeatAt    time.Time
 }
 
 // Run starts the server and blocks until shutdown (prefix+&, cogito

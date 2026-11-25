@@ -27,6 +27,7 @@ func (s *Server) openShutdownConfirm(c *clientConn) {
 	c.helpTop = 0
 	c.prefixArmed = false
 	c.prefixBuf = nil
+	c.clearRepeat()
 	c.confirmOpen = true
 	c.forceFull = true
 	s.broadcast()
@@ -38,6 +39,7 @@ func (s *Server) closeShutdownConfirm(c *clientConn) {
 	}
 	c.confirmOpen = false
 	c.forceFull = true
+	c.clearRepeat()
 	s.broadcast()
 }
 

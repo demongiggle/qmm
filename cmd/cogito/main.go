@@ -73,7 +73,7 @@ Inside cogito, press Ctrl-a to send a command prefix, followed by:
   &         shut down session (confirm with y, cancel with n/Esc)
   o         cycle to next pane
   z         toggle floating zoom (centered, at least 2%% margins)
-  Ctrl-← →  resize pane in direction  (also: Ctrl-↑ Ctrl-↓)
+  Ctrl-← →  resize pane; hold Ctrl to repeat (also: Ctrl-↑ Ctrl-↓)
   d         detach (session keeps running)
   Ctrl-a    send a literal Ctrl-a to the application
   ?         show categorized key help (Esc/q closes)
