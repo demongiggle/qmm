@@ -27,6 +27,18 @@ const (
 	StyleReverse
 )
 
+// Cell color encodings. Palette indexes 0-255 refer to the xterm palette;
+// ColorRGBFlag marks a 24-bit RGB value packed as 0xRRGGBB.
+const (
+	ColorDefault int32 = -1
+	ColorRGBFlag int32 = 1 << 24
+)
+
+// RGBColor encodes a 24-bit RGB color for a Cell foreground or background.
+func RGBColor(r, g, b int32) int32 {
+	return ColorRGBFlag | (r&0xff)<<16 | (g&0xff)<<8 | (b & 0xff)
+}
+
 // ---------------------------------------------------------------------------
 // client -> server messages
 // ---------------------------------------------------------------------------
@@ -120,12 +132,13 @@ type Welcome struct {
 	Rows int
 }
 
-// Cell describes one terminal cell. FG/BG are -1 for the terminal default,
-// otherwise an xterm palette index 0-255.
+// Cell describes one terminal cell. FG/BG are ColorDefault for the terminal
+// default, an xterm palette index 0-255, or ColorRGBFlag plus a 24-bit RGB
+// value (as produced by RGBColor).
 type Cell struct {
 	Row, Col int
 	Ch       rune
-	FG, BG   int16
+	FG, BG   int32
 	Style    uint8
 }
 

@@ -29,7 +29,10 @@ func TestRoundTrip(t *testing.T) {
 		Welcome{Cols: 120, Rows: 40},
 		Frame{
 			Full: true, Cols: 2, Rows: 1,
-			Cells:   []Cell{{Row: 0, Col: 0, Ch: 'A', FG: 1, BG: 2, Style: StyleBold | StyleReverse}},
+			Cells: []Cell{
+				{Row: 0, Col: 0, Ch: 'A', FG: 1, BG: 2, Style: StyleBold | StyleReverse},
+				{Row: 0, Col: 1, Ch: 'B', FG: RGBColor(18, 52, 86), BG: ColorDefault},
+			},
 			CursorX: 1, CursorY: 0, CursorVisible: true,
 			Panes:     []PaneRect{{ID: 1, X: 0, Y: 0, W: 2, H: 1, Active: true}},
 			Splitters: []Splitter{{ID: 9, X: 1, Y: 0, Len: 1, Vertical: true}},
@@ -69,6 +72,17 @@ func TestRoundTrip(t *testing.T) {
 		if err := <-errCh; err != nil {
 			t.Fatalf("msg %d (%T): %v", i, want, err)
 		}
+	}
+}
+
+func TestRGBColor(t *testing.T) {
+	want := ColorRGBFlag | 0x123456
+	if got := RGBColor(0x12, 0x34, 0x56); got != want {
+		t.Fatalf("RGBColor = %#x, want %#x", got, want)
+	}
+	// Components are bytes; out-of-range values must not spill into the flag.
+	if got := RGBColor(0x112, 0x234, 0x356); got != want {
+		t.Fatalf("RGBColor with oversized components = %#x, want %#x", got, want)
 	}
 }
 

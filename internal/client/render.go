@@ -24,11 +24,20 @@ type attach struct {
 	mouseDown    bool
 }
 
-func colorOf(v int16) tcell.Color {
-	if v < 0 {
+// colorOf converts a protocol color to a tcell color. Palette indexes must
+// go through tcell.PaletteColor: a bare tcell.Color(index) lacks ColorValid,
+// so tcell silently omits it when writing SGR sequences to the terminal.
+func colorOf(v int32) tcell.Color {
+	switch {
+	case v < 0:
+		return tcell.ColorDefault
+	case v&protocol.ColorRGBFlag != 0:
+		return tcell.NewHexColor(v & 0xffffff)
+	case v <= 255:
+		return tcell.PaletteColor(int(v))
+	default:
 		return tcell.ColorDefault
 	}
-	return tcell.Color(v)
 }
 
 func styleOf(c protocol.Cell) tcell.Style {

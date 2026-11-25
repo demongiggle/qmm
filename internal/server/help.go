@@ -81,7 +81,7 @@ type helpView struct {
 	lineCount   int
 }
 
-type helpSetCell func(x, y int, ch rune, fg, bg int16, style uint8)
+type helpSetCell func(x, y int, ch rune, fg, bg int32, style uint8)
 
 // openHelp, closeHelp and toggleHelp keep help local to one attached client.
 // Each client owns a compositor so one user's overlay never covers another
@@ -462,7 +462,7 @@ func fitHelpText(text string, width int) string {
 	return b.String() + "…"
 }
 
-func putHelpText(setCell helpSetCell, x, y, width int, text string, fg, bg int16, style uint8) int {
+func putHelpText(setCell helpSetCell, x, y, width int, text string, fg, bg int32, style uint8) int {
 	pos := 0
 	for _, r := range text {
 		rw := uniseg.StringWidth(string(r))

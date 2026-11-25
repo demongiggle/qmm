@@ -21,7 +21,7 @@ const (
 )
 
 const (
-	colDefault = -1
+	colDefault = protocol.ColorDefault
 
 	colBorder       = 238
 	colBorderActive = 46
@@ -64,7 +64,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	for i := range cells {
 		cells[i] = blankCell(i/cols, i%cols)
 	}
-	setCell := func(x, y int, ch rune, fg, bg int16, style uint8) {
+	setCell := func(x, y int, ch rune, fg, bg int32, style uint8) {
 		if x < 0 || y < 0 || x >= cols || y >= rows {
 			return
 		}
@@ -173,7 +173,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				ch = '┼'
 			}
 			x, y := idx%cols, idx/cols
-			color := int16(colBorder)
+			color := int32(colBorder)
 			if haveActive && borderTouchesRect(x, y, m, activeRect) {
 				color = colBorderActive
 			}
@@ -208,7 +208,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		}
 		start := col
 		for _, r := range runes {
-			fg, bg := int16(colBarFG), int16(colBarBG)
+			fg, bg := int32(colBarFG), int32(colBarBG)
 			var st uint8
 			if isActive {
 				fg, bg = colBarActiveFG, colBarActiveBG
@@ -271,8 +271,24 @@ func (p *pane) vtCursor() vtCursor {
 	return vtCursor{x: cur.X, y: cur.Y, visible: vis}
 }
 
+// vtColor translates a vt10x color into the protocol's color encoding.
+// vt10x reserves values at and above DefaultFG for default colors, stores
+// palette indexes below 256, and stores 24-bit RGB values as 0xRRGGBB. Very
+// dark RGB values are indistinguishable from palette indexes in vt10x, so they
+// retain their palette interpretation.
+func vtColor(c vt10x.Color) int32 {
+	switch {
+	case c >= vt10x.DefaultFG:
+		return protocol.ColorDefault
+	case c <= 0xff:
+		return int32(c)
+	default:
+		return protocol.RGBColor(int32(c>>16), int32(c>>8), int32(c))
+	}
+}
+
 // blitPane copies the pane's virtual screen into the cell buffer.
-func blitPane(setCell func(x, y int, ch rune, fg, bg int16, style uint8), p *pane, r layout.Rect) {
+func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pane, r layout.Rect) {
 	p.vt.Lock()
 	cols, rows := p.vt.Size()
 	for y := 0; y < r.H && y < rows; y++ {
@@ -287,13 +303,7 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int16, style uint8), p *pan
 			if ch == 0 {
 				ch = ' '
 			}
-			fg, bg := int16(colDefault), int16(colDefault)
-			if uint32(g.FG) < uint32(vt10x.DefaultFG) {
-				fg = int16(g.FG)
-			}
-			if uint32(g.BG) < uint32(vt10x.DefaultBG) {
-				bg = int16(g.BG)
-			}
+			fg, bg := vtColor(g.FG), vtColor(g.BG)
 			var st uint8
 			if g.Mode&gttrBold != 0 {
 				st |= protocol.StyleBold

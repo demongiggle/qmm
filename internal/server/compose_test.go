@@ -80,6 +80,55 @@ func TestComposeSplitFrame(t *testing.T) {
 	}
 }
 
+func TestComposePreservesPaneAndWindowColors(t *testing.T) {
+	s := newTestSession()
+	if _, err := s.panes[1].vt.Write([]byte("\x1b[1;38;5;46;48;5;236mX")); err != nil {
+		t.Fatalf("write 256-color pane output: %v", err)
+	}
+	if _, err := s.panes[2].vt.Write([]byte("\x1b[38;2;18;52;86;48;2;240;241;242mY")); err != nil {
+		t.Fatalf("write RGB pane output: %v", err)
+	}
+
+	f := (&compositor{}).compose(s, 80, 24, true)
+
+	// Pane output: 256-color palette and text attributes.
+	paletteCell := cellAt(f, 0, 0)
+	if paletteCell.Ch != 'X' || paletteCell.FG != 46 || paletteCell.BG != 236 {
+		t.Fatalf("256-color pane cell = %+v, want X with FG 46 / BG 236", paletteCell)
+	}
+	if paletteCell.Style&protocol.StyleBold == 0 {
+		t.Error("256-color pane cell lost bold attribute")
+	}
+
+	// Pane output: 24-bit RGB colors survive the protocol encoding.
+	var second protocol.PaneRect
+	for _, p := range f.Panes {
+		if p.ID == 2 {
+			second = p
+		}
+	}
+	if second.W == 0 {
+		t.Fatal("second pane missing from frame")
+	}
+	rgbCell := cellAt(f, second.X, second.Y)
+	if want := protocol.RGBColor(18, 52, 86); rgbCell.FG != want {
+		t.Errorf("RGB foreground = %#x, want %#x", rgbCell.FG, want)
+	}
+	if want := protocol.RGBColor(240, 241, 242); rgbCell.BG != want {
+		t.Errorf("RGB background = %#x, want %#x", rgbCell.BG, want)
+	}
+
+	// Window chrome: the active tab and active pane border carry colors too.
+	tab := cellAt(f, 0, 23)
+	if tab.FG != colBarActiveFG || tab.BG != colBarActiveBG {
+		t.Errorf("active tab colors = %d/%d, want %d/%d", tab.FG, tab.BG, colBarActiveFG, colBarActiveBG)
+	}
+	border := cellAt(f, 40, 5)
+	if border.FG != colBorderActive {
+		t.Errorf("active border color = %d, want %d", border.FG, colBorderActive)
+	}
+}
+
 func TestComposeZoomFrame(t *testing.T) {
 	s := newTestSession()
 	s.windows[0].zoomed = true

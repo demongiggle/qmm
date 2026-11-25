@@ -19,6 +19,8 @@ detach/attach — nothing else yet.
   switch, drag a divider to resize
 - **Zoom** a pane to fill the window (with a 1-cell margin so you can tell
   it's zoomed)
+- **Color**: pane output keeps ANSI 16/256-color and 24-bit RGB styling;
+  active pane borders, window tabs, and the help overlay are color-coded
 - **Interactive help** (`prefix` `?`): categorized, color-coded key cheatsheet
 - Windows are auto-named after the foreground process
 - Multiple clients may attach to the same session; the effective size is the
@@ -135,6 +137,8 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 ```
 
 - [ ] `cogito` starts a session: shell appears, status bar shows `0:<name>*` + clock
+- [ ] `printf '\033[31mred\033[0m \033[48;5;22mgreen\033[0m\n'` shows colors in a pane
+- [ ] active pane border, active window tab, and `Ctrl-a ?` help are color-coded
 - [ ] `Ctrl-a %` splits left/right; `Ctrl-a "` splits top/bottom; borders render
 - [ ] `Ctrl-a o` cycles panes; focus follows
 - [ ] `Ctrl-a z` zooms the active pane (1-cell margin box, `Z` flag in status bar), toggle restores
