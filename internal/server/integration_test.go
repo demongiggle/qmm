@@ -1,0 +1,320 @@
+package server
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/demongiggle/cogito/internal/protocol"
+)
+
+type testClient struct {
+	t     *testing.T
+	conn  net.Conn
+	codec *protocol.Codec
+}
+
+func dial(t *testing.T, sock string, cols, rows int) *testClient {
+	t.Helper()
+	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	codec := protocol.NewCodec(conn)
+	if err := codec.Send(protocol.Hello{Term: "xterm-256color", Cols: cols, Rows: rows}); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+	tc := &testClient{t: t, conn: conn, codec: codec}
+	return tc
+}
+
+func (tc *testClient) recv() interface{} {
+	tc.t.Helper()
+	_ = tc.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	msg, err := tc.codec.Recv()
+	if err != nil {
+		tc.t.Fatalf("recv: %v", err)
+	}
+	return msg
+}
+
+func (tc *testClient) recvFrame() protocol.Frame {
+	tc.t.Helper()
+	for {
+		m := tc.recv()
+		if f, ok := m.(protocol.Frame); ok {
+			return f
+		}
+	}
+}
+
+// waitForFrame accumulates frames until pred is true or the deadline passes.
+func (tc *testClient) waitForFrame(pred func(protocol.Frame) bool) protocol.Frame {
+	tc.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		f := tc.recvFrame()
+		if pred(f) {
+			return f
+		}
+	}
+	tc.t.Fatal("timed out waiting for matching frame")
+	return protocol.Frame{}
+}
+
+func frameText(f protocol.Frame) string {
+	rows := map[int]map[int]rune{}
+	maxRow := 0
+	for _, c := range f.Cells {
+		if rows[c.Row] == nil {
+			rows[c.Row] = map[int]rune{}
+		}
+		rows[c.Row][c.Col] = c.Ch
+		if c.Row > maxRow {
+			maxRow = c.Row
+		}
+	}
+	var sb strings.Builder
+	for r := 0; r <= maxRow; r++ {
+		cols := rows[r]
+		if cols == nil {
+			sb.WriteByte('\n')
+			continue
+		}
+		maxCol := 0
+		for c := range cols {
+			if c > maxCol {
+				maxCol = c
+			}
+		}
+		for c := 0; c <= maxCol; c++ {
+			if ch, ok := cols[c]; ok {
+				sb.WriteRune(ch)
+			} else {
+				sb.WriteByte(' ')
+			}
+		}
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
+func waitSocket(t *testing.T, sock string) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(sock); err == nil {
+			if c, err := net.DialTimeout("unix", sock, 100*time.Millisecond); err == nil {
+				_ = c.Close()
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("server socket did not appear")
+}
+
+func TestServerLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+
+	// Wait for the server to accept connections.
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+
+	// Expect a Welcome first.
+	m := c.recv()
+	welcome, ok := m.(protocol.Welcome)
+	if !ok {
+		t.Fatalf("expected Welcome, got %T", m)
+	}
+	if welcome.Cols != 80 || welcome.Rows != 24 {
+		t.Fatalf("welcome = %+v, want 80x24", welcome)
+	}
+
+	// First frame should be a full repaint including the status bar.
+	f := c.recvFrame()
+	if !f.Full {
+		t.Fatalf("first frame not Full")
+	}
+	if text := frameText(f); !strings.Contains(text, "0:") {
+		t.Fatalf("status bar missing window entry, got:\n%s", text)
+	}
+
+	// Type a marker into the shell; expect it to appear on screen.
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo cogito-integration-marker\n")}); err != nil {
+		t.Fatalf("send input: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return strings.Contains(frameText(f), "cogito-integration-marker")
+	})
+
+	// Split the pane; expect two panes in the frame metadata.
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	f = c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 2 })
+	if len(f.Splitters) == 0 {
+		t.Fatal("expected at least one splitter after split")
+	}
+
+	// New window; expect a tab switch in the frame metadata.
+	if err := c.codec.Send(protocol.ActionNewWindow{}); err != nil {
+		t.Fatalf("new window: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool { return len(f.Tabs) >= 2 })
+
+	// Kill the server; client should observe goodbye, Run should return nil.
+	if err := c.conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// New connection to request shutdown.
+	c2 := dial(t, sock, 80, 24)
+	_ = c2 // server sends Welcome; we only need the shutdown RPC
+	if err := c2.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+
+	// Socket file must be removed.
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Fatalf("socket still present after shutdown")
+	}
+}
+
+func TestMultiClientMinSize(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	a := dial(t, sock, 80, 24)
+	_ = a.recv() // Welcome
+	// B connects with a larger terminal; effective size stays 80x24.
+	b := dial(t, sock, 100, 30)
+	m := b.recv()
+	w, ok := m.(protocol.Welcome)
+	if !ok {
+		t.Fatalf("B: expected Welcome, got %T", m)
+	}
+	if w.Cols != 80 || w.Rows != 24 {
+		t.Fatalf("B: effective size %dx%d, want 80x24 (min of clients)", w.Cols, w.Rows)
+	}
+
+	// A disconnects; B should grow to its own size on the next full frame.
+	if err := a.conn.Close(); err != nil {
+		t.Fatalf("close A: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_ = b.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		msg, err := b.codec.Recv()
+		if err != nil {
+			t.Fatalf("B recv: %v", err)
+		}
+		if f, ok := msg.(protocol.Frame); ok && f.Full {
+			if f.Cols == 100 && f.Rows == 30 {
+				goto done
+			}
+		}
+	}
+	t.Fatal("B never received a full frame at 100x30 after A detached")
+done:
+
+	if err := b.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
+func TestDetachKeepsSession(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	// Attach, run a command whose output marker cannot appear in the echoed
+	// command line itself, then detach via prefix+d.
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // welcome
+	_ = c.recvFrame()
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo $((100+337))\n")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	// Wait until the marker is visible on screen before detaching.
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return strings.Contains(frameText(f), "437")
+	})
+	// Ctrl-a d
+	if err := c.codec.Send(protocol.Input{Data: []byte{0x01, 'd'}}); err != nil {
+		t.Fatalf("detach: %v", err)
+	}
+
+	// Expect Goodbye and server stays alive.
+	deadline := time.Now().Add(3 * time.Second)
+	gotGoodbye := false
+	for time.Now().Before(deadline) {
+		_ = c.conn.SetReadDeadline(time.Now().Add(time.Second))
+		m, err := c.codec.Recv()
+		if err != nil {
+			break
+		}
+		if _, ok := m.(protocol.Goodbye); ok {
+			gotGoodbye = true
+			break
+		}
+	}
+	if !gotGoodbye {
+		t.Fatal("did not receive Goodbye on detach")
+	}
+
+	// Server should still accept new connections.
+	c2 := dial(t, sock, 80, 24)
+	_ = c2.recv()
+	frame := c2.waitForFrame(func(f protocol.Frame) bool { return f.Full })
+	if text := frameText(frame); !strings.Contains(text, "437") {
+		t.Fatalf("session content lost after detach (marker 437 not found); screen:\n%s", text)
+	}
+
+	// Clean shutdown.
+	if err := c2.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
