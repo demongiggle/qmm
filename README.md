@@ -26,8 +26,13 @@ detach/attach — nothing else yet.
 ## Build
 
 ```sh
+make            # builds ./cogito
+# or, without make:
 go build -o cogito ./cmd/cogito
 ```
+
+Run `make help` to see targets for tests, vetting, installing, and
+cleaning. Set `BINARY=/path/to/cogito` to change the build output.
 
 Requires Go 1.24+ and Linux (uses ptys and /proc).
 
