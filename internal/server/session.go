@@ -51,6 +51,9 @@ type session struct {
 
 	// exitCh receives pane IDs whose child process has exited.
 	exitCh chan int
+	// onOutput is called after a pane produces output; used to schedule a
+	// re-render. May be nil in tests.
+	onOutput func()
 }
 
 func newSession() *session {
@@ -153,7 +156,7 @@ func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
 		vt:   vt10x.New(vt10x.WithSize(cols, rows)),
 	}
 	s.panes[id] = p
-	go p.readLoop(s.exitCh)
+	go p.readLoop(s.exitCh, s.onOutput)
 	// Reap the child when it exits; the PTY read loop usually notices first
 	// (EIO after the last output), so both paths go through notifyExit.
 	go func() {
@@ -172,12 +175,15 @@ func (p *pane) notifyExit(ch chan int) {
 	})
 }
 
-func (p *pane) readLoop(exitCh chan int) {
+func (p *pane) readLoop(exitCh chan int, onOutput func()) {
 	br := bufio.NewReaderSize(p.ptmx, 32*1024)
 	for {
 		if err := p.vt.Parse(br); err != nil {
 			p.notifyExit(exitCh)
 			return
+		}
+		if onOutput != nil {
+			onOutput()
 		}
 	}
 }

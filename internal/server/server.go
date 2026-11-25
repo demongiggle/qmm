@@ -75,7 +75,6 @@ type clientMsg struct {
 }
 
 type clientConn struct {
-	id    int
 	conn  net.Conn
 	codec *protocol.Codec
 	cols  int
@@ -115,7 +114,7 @@ func Run(cfg Config) error {
 		shutdown:  make(chan struct{}, 1),
 	}
 	s.sess.exitCh = s.paneExit
-
+	s.sess.onOutput = s.scheduleRender
 	sock, err := cfg.SocketPath()
 	if err != nil {
 		return err
