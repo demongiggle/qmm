@@ -117,6 +117,7 @@ func waitSocket(t *testing.T, sock string) {
 }
 
 func TestServerLifecycle(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
@@ -490,6 +491,7 @@ func TestPrefixArrowResize(t *testing.T) {
 }
 
 func TestDetachKeepsSession(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
@@ -558,6 +560,7 @@ func TestDetachKeepsSession(t *testing.T) {
 // TestPaneDeathCascadesSessionEnd runs "exit" in the only pane and expects the
 // server to notice, tear down the session, and shut down.
 func TestPaneDeathCascadesSessionEnd(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
@@ -611,6 +614,7 @@ func TestPaneDeathCascadesSessionEnd(t *testing.T) {
 // takes over the screen with the zoom flag set, and toggling back restores
 // the split.
 func TestToggleZoomViaPrefix(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
