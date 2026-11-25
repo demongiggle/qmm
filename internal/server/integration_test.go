@@ -228,6 +228,56 @@ func TestShutdownWithoutHandshake(t *testing.T) {
 	}
 }
 
+func TestConcurrentServerStartup(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+
+	// Two servers racing for the same socket dir: exactly one may win.
+	errs := make(chan error, 2)
+	go func() { errs <- Run(cfg) }()
+	go func() { errs <- Run(cfg) }()
+
+	var loserErr, winnerErr error
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errs:
+			if err != nil {
+				loserErr = err
+			} else {
+				winnerErr = err // nil means clean shutdown
+			}
+		case <-time.After(2 * time.Second):
+			// No error yet: this is the winner, still running.
+		}
+	}
+
+	// Exactly one should have failed immediately with the lock error.
+	if loserErr == nil {
+		t.Fatal("expected one server to lose the race, got none")
+	}
+	t.Logf("loser error: %v", loserErr)
+	_ = winnerErr
+
+	// The winner must be serving: shut it down via bare Shutdown.
+	sock := filepath.Join(dir, "default")
+	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
+	if err != nil {
+		t.Fatalf("winner not serving: %v", err)
+	}
+	if err := protocol.NewCodec(conn).Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	_ = conn.Close()
+	select {
+	case err := <-errs:
+		if err != nil {
+			t.Fatalf("winner returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("winner did not shut down")
+	}
+}
+
 func TestMultiClientMinSize(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
