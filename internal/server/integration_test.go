@@ -341,6 +341,105 @@ done:
 	}
 }
 
+// TestFocusDragAndResize exercises the mouse-driven actions end to end over
+// the wire: focus by coordinates, border drag (start/update/end), keyboard
+// resize, and window selection by index.
+func TestFocusDragAndResize(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+
+	// Split into two panes; capture the splitter position and active pane.
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	f := c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 2 && len(f.Splitters) == 1 })
+	splitX := f.Splitters[0].X
+	splitterID := f.Splitters[0].ID
+	activeBefore := -1
+	for _, p := range f.Panes {
+		if p.Active {
+			activeBefore = p.ID
+		}
+	}
+	if activeBefore == -1 {
+		t.Fatal("no active pane reported")
+	}
+
+	// Click inside the right pane: it should become active.
+	if err := c.codec.Send(protocol.ActionFocus{X: splitX + 2, Y: 2}); err != nil {
+		t.Fatalf("focus: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		for _, p := range f.Panes {
+			if p.Active && p.ID != activeBefore {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Drag the border 4 cells to the right.
+	for _, msg := range []interface{}{
+		protocol.ActionDragStart{Splitter: splitterID},
+		protocol.ActionDragUpdate{Splitter: splitterID, Delta: 4},
+		protocol.ActionDragEnd{Splitter: splitterID},
+	} {
+		if err := c.codec.Send(msg); err != nil {
+			t.Fatalf("drag message: %v", err)
+		}
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Splitters) == 1 && f.Splitters[0].X == splitX+4
+	})
+
+	// Keyboard resize: 2 cells further right.
+	if err := c.codec.Send(protocol.ActionResizePane{Direction: protocol.DirRight, Delta: 2}); err != nil {
+		t.Fatalf("resize: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Splitters) == 1 && f.Splitters[0].X == splitX+6
+	})
+
+	// Open a second window and jump to it by index, then back.
+	if err := c.codec.Send(protocol.ActionNewWindow{}); err != nil {
+		t.Fatalf("new window: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Tabs) == 2 && f.Tabs[1].Active
+	})
+	if err := c.codec.Send(protocol.ActionSelectWindow{Index: 0}); err != nil {
+		t.Fatalf("select window: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		for _, tab := range f.Tabs {
+			if tab.Index == 0 {
+				return tab.Active
+			}
+		}
+		return false
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
 func TestDetachKeepsSession(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
