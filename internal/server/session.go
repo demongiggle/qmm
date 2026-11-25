@@ -266,8 +266,8 @@ func (s *session) activePane() *pane {
 	return s.panes[w.activePane]
 }
 
-// splitActivePane splits the active pane. dir is layout.Vertical (divider
-// vertical) or layout.Horizontal.
+// splitActivePane splits the active pane and focuses the new pane. dir is
+// layout.Vertical (divider vertical) or layout.Horizontal.
 func (s *session) splitActivePane(cols, rows int, dir layout.Direction) (*window, error) {
 	w := s.activeWindow()
 	if w == nil {
@@ -288,5 +288,6 @@ func (s *session) splitActivePane(cols, rows int, dir layout.Direction) (*window
 		delete(s.panes, np.id)
 		return nil, fmt.Errorf("split failed")
 	}
+	w.activePane = np.id
 	return w, nil
 }

@@ -374,8 +374,9 @@ func TestFocusDragAndResize(t *testing.T) {
 		t.Fatal("no active pane reported")
 	}
 
-	// Click inside the right pane: it should become active.
-	if err := c.codec.Send(protocol.ActionFocus{X: splitX + 2, Y: 2}); err != nil {
+	// Click inside the original left pane: it should become active (splits
+	// start out focused on the new right pane).
+	if err := c.codec.Send(protocol.ActionFocus{X: 2, Y: 2}); err != nil {
 		t.Fatalf("focus: %v", err)
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
@@ -426,6 +427,80 @@ func TestFocusDragAndResize(t *testing.T) {
 			}
 		}
 		return false
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
+// TestNewPaneAndWindowTakeFocus verifies that keyboard input targets a newly
+// created pane or window: splitting activates the new pane, and Ctrl-a c
+// activates the new window. Sending "exit" proves focus drives input.
+func TestNewPaneAndWindowTakeFocus(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+
+	initial := c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 1 })
+	originalID := initial.Panes[0].ID
+	if !initial.Panes[0].Active {
+		t.Fatal("initial pane is not active")
+	}
+
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	split := c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 2 })
+	createdID, activeID := -1, -1
+	activeCount := 0
+	for _, p := range split.Panes {
+		if p.ID != originalID {
+			createdID = p.ID
+		}
+		if p.Active {
+			activeID = p.ID
+			activeCount++
+		}
+	}
+	if createdID == -1 {
+		t.Fatalf("no new pane in split frame: %+v", split.Panes)
+	}
+	if activeCount != 1 || activeID != createdID {
+		t.Fatalf("active pane = %d (%d active), want new pane %d: %+v",
+			activeID, activeCount, createdID, split.Panes)
+	}
+
+	// Input follows the new pane: exiting it must leave the original pane.
+	if err := c.codec.Send(protocol.Input{Data: []byte("exit\n")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Panes) == 1 && f.Panes[0].ID == originalID && f.Panes[0].Active
+	})
+
+	if err := c.codec.Send(protocol.ActionNewWindow{}); err != nil {
+		t.Fatalf("new window: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Tabs) == 2 && f.Tabs[1].Active &&
+			len(f.Panes) == 1 && f.Panes[0].Active && f.Panes[0].ID != originalID
 	})
 
 	if err := c.codec.Send(protocol.Shutdown{}); err != nil {

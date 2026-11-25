@@ -77,6 +77,8 @@ Inside cogito, press Ctrl-a to send a command prefix, followed by:
   Ctrl-a    send a literal Ctrl-a to the application
   ?         show categorized key help (Esc/q closes)
 
+New panes and windows take focus as soon as they are created.
+
 Mouse: click a pane to focus it, click a window name in the status bar to
 switch windows, drag a pane border to resize. Help is scrollable on short
 terminals with ↑/↓ or PgUp/PgDn.

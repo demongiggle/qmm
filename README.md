@@ -13,6 +13,8 @@ detach/attach — nothing else yet.
   tree; resize by dragging the divider with the mouse or with keys
 - Multiple **windows** per session, shown in a status bar (active window
   highlighted, `*` marker, `Z` when zoomed)
+- Creating a pane or window focuses it immediately, so typing goes to the
+  new shell
 - **Detach / reattach**: the session lives in a background server; close the
   terminal and `cogito attach` brings everything back
 - **Mouse**: click to focus a pane, click a window in the status bar to
@@ -142,12 +144,12 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] `cogito` starts a session: shell appears, status bar shows `0:<name>*` + clock
 - [ ] `printf '\033[31mred\033[0m \033[48;5;22mgreen\033[0m\n'` shows colors in a pane
 - [ ] active pane border, active window tab, and `Ctrl-a ?` help are color-coded
-- [ ] `Ctrl-a |` splits left/right; `Ctrl-a -` splits top/bottom; borders render
+- [ ] `Ctrl-a |` splits left/right; `Ctrl-a -` splits top/bottom; the new pane takes focus
 - [ ] `Ctrl-a o` cycles panes; focus follows
 - [ ] `Ctrl-a z` zooms the active pane (1-cell margin box, `Z` flag in status bar), toggle restores
 - [ ] click a pane to focus it; click a window name in the status bar to switch windows
 - [ ] drag a border: the pane resizes live and stays after detach/reattach
-- [ ] `Ctrl-a c` opens a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates
+- [ ] `Ctrl-a c` opens and focuses a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates
 - [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
 - [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes the pane
