@@ -440,6 +440,55 @@ func TestFocusDragAndResize(t *testing.T) {
 	}
 }
 
+// TestPrefixArrowResize verifies the Ctrl-a Ctrl-Right key sequence resizes
+// the active pane end to end (byte -> prefix state machine -> tree resize).
+func TestPrefixArrowResize(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	f := c.waitForFrame(func(f protocol.Frame) bool { return len(f.Splitters) == 1 })
+	startX := f.Splitters[0].X
+
+	// Ctrl-a Ctrl-Right (xterm encoding for Ctrl+RightArrow).
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01\x1b[1;5C")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Splitters) == 1 && f.Splitters[0].X == startX+2
+	})
+
+	// Ctrl-a Ctrl-Left moves it back.
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01\x1b[1;5D")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Splitters) == 1 && f.Splitters[0].X == startX
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
 func TestDetachKeepsSession(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
