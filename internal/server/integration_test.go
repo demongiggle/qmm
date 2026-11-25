@@ -198,6 +198,36 @@ func TestServerLifecycle(t *testing.T) {
 	}
 }
 
+func TestShutdownWithoutHandshake(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	// Send Shutdown as the very first message, like `cogito kill-server`.
+	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	codec := protocol.NewCodec(conn)
+	if err := codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	_ = conn.Close()
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down on bare Shutdown")
+	}
+}
+
 func TestMultiClientMinSize(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}

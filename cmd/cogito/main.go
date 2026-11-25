@@ -164,9 +164,7 @@ func killServer() error {
 	}
 	defer conn.Close()
 	codec := protocol.NewCodec(conn)
-	if err := codec.Send(protocol.Hello{Term: os.Getenv("TERM"), Cols: 80, Rows: 24}); err != nil {
-		return fmt.Errorf("send hello: %w", err)
-	}
+	// The server accepts a bare Shutdown before the Hello handshake.
 	if err := codec.Send(protocol.Shutdown{}); err != nil {
 		return fmt.Errorf("send shutdown: %w", err)
 	}
