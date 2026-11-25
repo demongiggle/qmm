@@ -1,5 +1,5 @@
-// Command cogito is a terminal multiplexer: panes in windows, multiple
-// clients, mouse support. Run `cogito` to start or attach to the session.
+// Command qmm is a terminal multiplexer: panes in windows, multiple
+// clients, mouse support. Run `qmm` to start or attach to the session.
 package main
 
 import (
@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/client"
-	"github.com/demongiggle/cogito/internal/protocol"
-	"github.com/demongiggle/cogito/internal/server"
+	"github.com/demongiggle/qmm/internal/client"
+	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/server"
 )
 
 const version = "0.1.0"
@@ -46,25 +46,25 @@ func main() {
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 	case "-v", "--version", "version":
-		fmt.Printf("cogito %s\n", version)
+		fmt.Printf("qmm %s\n", version)
 	default:
-		fmt.Fprintf(os.Stderr, "cogito: unknown command %q\n\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "qmm: unknown command %q\n\n", os.Args[1])
 		usage(os.Stderr)
 		os.Exit(2)
 	}
 }
 
 func usage(w *os.File) {
-	fmt.Fprintf(w, `cogito %s — a terminal multiplexer
+	fmt.Fprintf(w, `qmm %s — a terminal multiplexer
 
 Usage:
-  cogito              Start the session server if needed and attach to it
-  cogito attach       Attach to the running session (fails if none)
-  cogito kill-server  Terminate the session server and all panes
-  cogito --help       Show this help
-  cogito --version    Show version
+  qmm              Start the session server if needed and attach to it
+  qmm attach       Attach to the running session (fails if none)
+  qmm kill-server  Terminate the session server and all panes
+  qmm --help       Show this help
+  qmm --version    Show version
 
-Inside cogito, press Ctrl-a to send a command prefix, followed by:
+Inside qmm, press Ctrl-a to send a command prefix, followed by:
   |         split left/right (new pane to the right)
   -         split top/bottom (new pane below)
   c         new window
@@ -84,10 +84,10 @@ Mouse: click a pane to focus it, double-click it to toggle floating zoom,
 click a window name in the status bar to switch windows, drag a pane border
 to resize. Help is scrollable on short terminals with ↑/↓ or PgUp/PgDn.
 
-Config: $XDG_CONFIG_HOME/cogito/config.toml (or ~/.config/cogito/config.toml).
-Set COGITO_CONFIG to override the full file path; settings changes save
+Config: $XDG_CONFIG_HOME/qmm/config.toml (or ~/.config/qmm/config.toml).
+Set QMM_CONFIG to override the full file path; settings changes save
 automatically and r / Ctrl-r in Ctrl-a s reloads external edits.
-Set COGITO_SOCKET_DIR to customize the socket location.
+Set QMM_SOCKET_DIR to customize the socket location.
 `, version)
 }
 
@@ -96,7 +96,7 @@ func socketPath() (string, error) {
 }
 
 func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "cogito: %v\n", err)
+	fmt.Fprintf(os.Stderr, "qmm: %v\n", err)
 	os.Exit(1)
 }
 
@@ -168,7 +168,7 @@ func killServer() error {
 	}
 	conn, err := net.DialTimeout("unix", sock, time.Second)
 	if err != nil {
-		return fmt.Errorf("no cogito server running (socket %s)", sock)
+		return fmt.Errorf("no qmm server running (socket %s)", sock)
 	}
 	defer conn.Close()
 	codec := protocol.NewCodec(conn)
@@ -176,6 +176,6 @@ func killServer() error {
 	if err := codec.Send(protocol.Shutdown{}); err != nil {
 		return fmt.Errorf("send shutdown: %w", err)
 	}
-	fmt.Println("cogito: server shutting down")
+	fmt.Println("qmm: server shutting down")
 	return nil
 }

@@ -54,7 +54,7 @@ type configSetting struct {
 }
 
 func configFilePath() (string, error) {
-	if path := os.Getenv("COGITO_CONFIG"); path != "" {
+	if path := os.Getenv("QMM_CONFIG"); path != "" {
 		return filepath.Clean(path), nil
 	}
 	base, err := os.UserConfigDir()
@@ -65,7 +65,7 @@ func configFilePath() (string, error) {
 		}
 		base = filepath.Join(home, ".config")
 	}
-	return filepath.Join(base, "cogito", "config.toml"), nil
+	return filepath.Join(base, "qmm", "config.toml"), nil
 }
 
 func settingText(st *settingsState, id settingID) string {
@@ -148,7 +148,7 @@ func writeConfig(path string, st *settingsState) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, ".cogito-config-*.tmp")
+	f, err := os.CreateTemp(dir, ".qmm-config-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func logConfigWarning(logPath string, warning configWarning) {
 	if logPath == "" {
 		return
 	}
-	line := fmt.Sprintf("cogito: config warning: %s; config: %s", warning.Reason, warning.ConfigPath)
+	line := fmt.Sprintf("qmm: config warning: %s; config: %s", warning.Reason, warning.ConfigPath)
 	if warning.BackupPath != "" {
 		line += fmt.Sprintf("; backup: %s", warning.BackupPath)
 	}

@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func TestPrefixAmpersandShutdownRequiresConfirmation(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 

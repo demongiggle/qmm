@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 const (
@@ -36,7 +36,7 @@ func (s *Server) handleConfigWarningInput(c *clientConn, data []byte) {
 	case "q", "Q", "\x1b", "\x03", "\r", "\n", " ":
 		s.closeConfigWarning(c)
 	default:
-		c.enqueue(protocol.Notice{Text: "cogito: dismiss config warning"})
+		c.enqueue(protocol.Notice{Text: "qmm: dismiss config warning"})
 	}
 }
 

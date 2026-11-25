@@ -7,7 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 // mouseFixture wires a client-side attach struct to an in-memory screen and

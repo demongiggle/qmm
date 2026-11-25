@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func TestConfigWarningModalRendersAndBlocksInput(t *testing.T) {

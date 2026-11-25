@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func TestSplitPrefixBindings(t *testing.T) {

@@ -1,4 +1,4 @@
-// Package client implements the cogito terminal client: it renders frames
+// Package client implements the qmm terminal client: it renders frames
 // from the server with tcell and forwards input.
 package client
 
@@ -10,13 +10,13 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
-// debugLog, when COGITO_DEBUG_LOG is set, appends a line per event/byte for
+// debugLog, when QMM_DEBUG_LOG is set, appends a line per event/byte for
 // troubleshooting (best effort; failures are ignored).
 func debugLog(format string, args ...interface{}) {
-	path := os.Getenv("COGITO_DEBUG_LOG")
+	path := os.Getenv("QMM_DEBUG_LOG")
 	if path == "" {
 		return
 	}
@@ -28,13 +28,13 @@ func debugLog(format string, args ...interface{}) {
 	fmt.Fprintf(f, format+"\n", args...)
 }
 
-// Attach connects to the cogito server at socketPath, renders its screen and
+// Attach connects to the qmm server at socketPath, renders its screen and
 // blocks until the user detaches, the session ends, or the connection breaks.
 // The terminal is restored before returning.
 func Attach(socketPath string) error {
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
-		return fmt.Errorf("cogito: cannot reach server at %s (%w) — is a cogito session running?", socketPath, err)
+		return fmt.Errorf("qmm: cannot reach server at %s (%w) — is a qmm session running?", socketPath, err)
 	}
 	defer conn.Close()
 
@@ -42,10 +42,10 @@ func Attach(socketPath string) error {
 
 	screen, err := tcell.NewScreen()
 	if err != nil {
-		return fmt.Errorf("cogito: init screen: %w", err)
+		return fmt.Errorf("qmm: init screen: %w", err)
 	}
 	if err := screen.Init(); err != nil {
-		return fmt.Errorf("cogito: init screen: %w", err)
+		return fmt.Errorf("qmm: init screen: %w", err)
 	}
 	screen.EnableMouse()
 	// The caret is a software-rendered cell; hiding the host cursor keeps
@@ -62,18 +62,18 @@ func Attach(socketPath string) error {
 	// Handshake.
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := codec.Send(protocol.Hello{Term: os.Getenv("TERM"), Cols: cols, Rows: rows}); err != nil {
-		return fmt.Errorf("cogito: handshake: %w", err)
+		return fmt.Errorf("qmm: handshake: %w", err)
 	}
 	_ = conn.SetWriteDeadline(time.Time{})
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	msg, err := codec.Recv()
 	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil {
-		return fmt.Errorf("cogito: handshake: %w", err)
+		return fmt.Errorf("qmm: handshake: %w", err)
 	}
 	welcome, ok := msg.(protocol.Welcome)
 	if !ok {
-		return fmt.Errorf("cogito: unexpected handshake reply from server")
+		return fmt.Errorf("qmm: unexpected handshake reply from server")
 	}
 
 	msgs := make(chan interface{}, 64)
@@ -158,7 +158,7 @@ func Attach(socketPath string) error {
 	}
 
 	if reason != "" {
-		fmt.Fprintf(os.Stderr, "cogito: %s\n", reason)
+		fmt.Fprintf(os.Stderr, "qmm: %s\n", reason)
 	}
 	return nil
 }

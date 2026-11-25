@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 const (
@@ -153,7 +153,7 @@ func (s *Server) appendDisplayPanesDigit(c *clientConn, digit, count int) bool {
 	maxDigits := len(strconv.Itoa(maxNumber))
 	next := c.displayPanesInput + strconv.Itoa(digit)
 	if len(next) > maxDigits || !paneNumberHasPrefix(next, count) {
-		c.enqueue(protocol.Notice{Text: "cogito: invalid pane number"})
+		c.enqueue(protocol.Notice{Text: "qmm: invalid pane number"})
 		s.closeDisplayPanes(c)
 		return true
 	}
@@ -174,7 +174,7 @@ func (s *Server) commitDisplayPanesInput(c *clientConn, count int) {
 	}
 	n, err := strconv.Atoi(c.displayPanesInput)
 	if err != nil || n < 0 || n >= count {
-		c.enqueue(protocol.Notice{Text: "cogito: invalid pane number"})
+		c.enqueue(protocol.Notice{Text: "qmm: invalid pane number"})
 	} else {
 		s.selectDisplayPane(c, n)
 	}
@@ -225,7 +225,7 @@ func (s *Server) selectDisplayPane(c *clientConn, number int) {
 	}
 	ids := s.sess.windowPaneIDs(w)
 	if number < 0 || number >= len(ids) {
-		c.enqueue(protocol.Notice{Text: "cogito: invalid pane number"})
+		c.enqueue(protocol.Notice{Text: "qmm: invalid pane number"})
 		return
 	}
 	target := ids[number]

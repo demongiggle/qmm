@@ -1,4 +1,4 @@
-module github.com/demongiggle/cogito
+module github.com/demongiggle/qmm
 
 go 1.24.0
 

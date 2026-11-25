@@ -1,12 +1,12 @@
-# Build and development helpers for the cogito CLI.
+# Build and development helpers for the qmm CLI.
 
 GO ?= go
 GOFLAGS ?=
 GO_TEST_FLAGS ?= -race -count=1 -timeout 120s
 
-BINARY ?= cogito
-INSTALL_NAME ?= cogito
-PACKAGE ?= ./cmd/cogito
+BINARY ?= qmm
+INSTALL_NAME ?= qmm
+PACKAGE ?= ./cmd/qmm
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 DESTDIR ?=

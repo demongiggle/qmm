@@ -8,22 +8,22 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func TestConfigFilePathOverrideAndXDG(t *testing.T) {
 	dir := t.TempDir()
 	custom := filepath.Join(dir, "custom.toml")
-	t.Setenv("COGITO_CONFIG", custom)
+	t.Setenv("QMM_CONFIG", custom)
 	got, err := configFilePath()
 	if err != nil || got != custom {
-		t.Fatalf("COGITO_CONFIG path = %q, %v; want %q", got, err, custom)
+		t.Fatalf("QMM_CONFIG path = %q, %v; want %q", got, err, custom)
 	}
 
-	t.Setenv("COGITO_CONFIG", "")
+	t.Setenv("QMM_CONFIG", "")
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	got, err = configFilePath()
-	want := filepath.Join(dir, "cogito", "config.toml")
+	want := filepath.Join(dir, "qmm", "config.toml")
 	if err != nil || got != want {
 		t.Fatalf("XDG config path = %q, %v; want %q", got, err, want)
 	}

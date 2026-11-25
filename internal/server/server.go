@@ -1,4 +1,4 @@
-// Package server implements the cogito session daemon: it owns the PTYs,
+// Package server implements the qmm session daemon: it owns the PTYs,
 // the session state, and the composition of the screen; clients are thin.
 package server
 
@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 // Config controls socket placement.
 type Config struct {
 	// SocketDir overrides the socket directory; empty uses the default
-	// resolution ($COGITO_SOCKET_DIR, then $XDG_RUNTIME_DIR/cogito-<uid>,
-	// then /tmp/cogito-<uid>).
+	// resolution ($QMM_SOCKET_DIR, then $XDG_RUNTIME_DIR/qmm-<uid>,
+	// then /tmp/qmm-<uid>).
 	SocketDir string
 }
 
@@ -35,14 +35,14 @@ func (c Config) socketDir() string {
 	if c.SocketDir != "" {
 		return c.SocketDir
 	}
-	if d := os.Getenv("COGITO_SOCKET_DIR"); d != "" {
+	if d := os.Getenv("QMM_SOCKET_DIR"); d != "" {
 		return d
 	}
 	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-		return filepath.Join(d, fmt.Sprintf("cogito-%d", os.Getuid()))
+		return filepath.Join(d, fmt.Sprintf("qmm-%d", os.Getuid()))
 	}
 	base := os.TempDir()
-	return filepath.Join(base, fmt.Sprintf("cogito-%d", os.Getuid()))
+	return filepath.Join(base, fmt.Sprintf("qmm-%d", os.Getuid()))
 }
 
 // Server is the session daemon. All session state is confined to the
@@ -137,7 +137,7 @@ type clientConn struct {
 	repeatAt    time.Time
 }
 
-// Run starts the server and blocks until shutdown (prefix+&, cogito
+// Run starts the server and blocks until shutdown (prefix+&, qmm
 // kill-server, or the last pane exiting).
 func Run(cfg Config) error {
 	s := &Server{

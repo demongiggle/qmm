@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func hasStyledCellAt(f protocol.Frame, x, y int, ch rune, fg int32) bool {
@@ -23,7 +23,7 @@ func hasStyledCellAt(f protocol.Frame, x, y int, ch rune, fg int32) bool {
 func TestSettingsPageViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -48,7 +48,7 @@ func TestSettingsPageViaPrefix(t *testing.T) {
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
 		text := frameText(f)
-		return f.Full && strings.Contains(text, "COGITO SETTINGS") && strings.Contains(text, "Appearance")
+		return f.Full && strings.Contains(text, "QMM SETTINGS") && strings.Contains(text, "Appearance")
 	})
 
 	// Move to "Active pane border" and cycle Green -> Cyan.
@@ -65,7 +65,7 @@ func TestSettingsPageViaPrefix(t *testing.T) {
 		t.Fatalf("close settings: %v", err)
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
-		if !f.Full || strings.Contains(frameText(f), "COGITO SETTINGS") {
+		if !f.Full || strings.Contains(frameText(f), "QMM SETTINGS") {
 			return false
 		}
 		return hasStyledCellAt(f, splitX, 5, '│', 39)

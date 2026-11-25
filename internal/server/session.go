@@ -15,7 +15,7 @@ import (
 
 	"github.com/creack/pty"
 
-	"github.com/demongiggle/cogito/internal/layout"
+	"github.com/demongiggle/qmm/internal/layout"
 )
 
 const (
@@ -42,7 +42,7 @@ type window struct {
 	name       string
 }
 
-// session is the single cogito session: a set of windows.
+// session is the single qmm session: a set of windows.
 type session struct {
 	windows    map[int]*window
 	active     int
@@ -221,7 +221,7 @@ func (p *pane) kill() {
 // newWindow creates and activates a fresh window with one pane.
 func (s *session) newWindow(cols, rows int) (*window, error) {
 	idx := s.lowestFreeIndex()
-	w := &window{index: idx, name: "cogito"}
+	w := &window{index: idx, name: "qmm"}
 	p, err := s.spawnPane("", cols, rows)
 	if err != nil {
 		return nil, err

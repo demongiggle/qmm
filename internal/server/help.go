@@ -6,7 +6,7 @@ import (
 
 	"github.com/rivo/uniseg"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 // helpItem is one shortcut in the prefix-key cheatsheet. Keys are shown as
@@ -332,7 +332,7 @@ func (c *compositor) drawHelp(frame *protocol.Frame, setCell helpSetCell, cols, 
 	drawHelpFrame(setCell, x0, y0, x1, y1)
 
 	titleWidth := max(0, x1-x0-3)
-	putHelpText(setCell, x0+2, y0, titleWidth, " COGITO HELP · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y0, titleWidth, " QMM HELP · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
 	putHelpText(setCell, x0+2, y1, titleWidth, helpFooter(view), colHelpMuted, colHelpPanelBG, 0)
 
 	innerX := x0 + 2

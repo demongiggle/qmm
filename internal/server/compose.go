@@ -8,8 +8,8 @@ import (
 	"github.com/hinshun/vt10x"
 	"github.com/rivo/uniseg"
 
-	"github.com/demongiggle/cogito/internal/layout"
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/layout"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 // vt10x glyph attribute bits (see vt10x state.go).

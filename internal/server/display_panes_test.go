@@ -8,8 +8,8 @@ import (
 
 	"github.com/hinshun/vt10x"
 
-	"github.com/demongiggle/cogito/internal/layout"
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/layout"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func newManyPaneServer(t *testing.T, count int) (*Server, *clientConn) {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/rivo/uniseg"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 const (
@@ -516,7 +516,7 @@ func (c *compositor) drawSettings(frame *protocol.Frame, setCell helpSetCell, co
 	drawHelpFrame(setCell, x0, y0, x1, y1)
 
 	titleWidth := max(0, x1-x0-3)
-	putHelpText(setCell, x0+2, y0, titleWidth, " COGITO SETTINGS · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y0, titleWidth, " QMM SETTINGS · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
 	putHelpText(setCell, x0+2, y1, titleWidth, fitHelpText(settingsFooter(view), titleWidth), colHelpMuted, colHelpPanelBG, 0)
 
 	innerX := x0 + 2

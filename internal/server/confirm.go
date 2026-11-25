@@ -3,11 +3,11 @@ package server
 import (
 	"github.com/rivo/uniseg"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 // The shutdown prompt takes tmux's prefix+& cue: a destructive close asks
-// for an explicit y/n answer before it runs. cogito has only one session, so
+// for an explicit y/n answer before it runs. qmm has only one session, so
 // confirming ends the whole server rather than just one window.
 const (
 	confirmTitle    = " SHUTDOWN SESSION "
@@ -60,7 +60,7 @@ func (s *Server) handleShutdownConfirmInput(c *clientConn, data []byte) {
 	case "n", "N", "q", "Q", "\x1b", "\x03":
 		s.closeShutdownConfirm(c)
 	default:
-		c.enqueue(protocol.Notice{Text: "cogito: answer y or n"})
+		c.enqueue(protocol.Notice{Text: "qmm: answer y or n"})
 	}
 }
 

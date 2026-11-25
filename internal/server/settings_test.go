@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func TestPrefixSOpensCategorizedSettings(t *testing.T) {
@@ -28,7 +28,7 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	}
 	text := frameText(f)
 	for _, want := range []string{
-		"COGITO SETTINGS", "Appearance", "Panes", "Layout", "Session",
+		"QMM SETTINGS", "Appearance", "Panes", "Layout", "Session",
 		"Status bar clock", "Active pane border", "Cursor shape", "Cursor blink",
 		"Pane number timeout", "Double-click zoom", "Keyboard resize step",
 		"Automatic window names", "Confirm shutdown", "[On]", "[Green]",
@@ -85,7 +85,7 @@ func TestSettingsNavigationAndAdjustment(t *testing.T) {
 	if c.settingsOpen {
 		t.Fatal("q did not close settings")
 	}
-	if text := frameText(*c.frame); strings.Contains(text, "COGITO SETTINGS") {
+	if text := frameText(*c.frame); strings.Contains(text, "QMM SETTINGS") {
 		t.Errorf("settings overlay survived close:\n%s", text)
 	}
 }
@@ -98,7 +98,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 	s, c := newHelpServer(40, 10)
 	fireBinding(s, c, "s")
 	text := frameText(*c.frame)
-	for _, want := range []string{"COGITO SETTINGS", "↑/↓", "r reload", "q close", "1-"} {
+	for _, want := range []string{"QMM SETTINGS", "↑/↓", "r reload", "q close", "1-"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("small settings frame missing %q:\n%s", want, text)
 		}
@@ -126,7 +126,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 func TestSettingsPageSkipsTooSmallTerminal(t *testing.T) {
 	f := (&compositor{settingsOpen: true}).compose(newTestSession(), 20, 5, true)
 	text := frameText(f)
-	if strings.Contains(text, "COGITO SETTINGS") {
+	if strings.Contains(text, "QMM SETTINGS") {
 		t.Errorf("settings page covered the terminal-too-small notice:\n%s", text)
 	}
 	if !strings.Contains(strings.Join(strings.Fields(text), ""), "terminaltoosmall") {
@@ -301,10 +301,10 @@ func TestSettingsOverlayIsPerClientButValuesAreShared(t *testing.T) {
 	if c1.frame == nil || c2.frame == nil {
 		t.Fatal("broadcast did not render both client frames")
 	}
-	if !strings.Contains(frameText(*c1.frame), "COGITO SETTINGS") {
+	if !strings.Contains(frameText(*c1.frame), "QMM SETTINGS") {
 		t.Error("requesting client is missing the settings page")
 	}
-	if strings.Contains(frameText(*c2.frame), "COGITO SETTINGS") {
+	if strings.Contains(frameText(*c2.frame), "QMM SETTINGS") {
 		t.Error("settings page leaked to another attached client")
 	}
 

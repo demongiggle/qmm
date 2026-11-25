@@ -1,5 +1,5 @@
-// Package protocol defines the wire format spoken between cogito clients and
-// the cogito session server over the Unix domain socket. Messages are Go
+// Package protocol defines the wire format spoken between qmm clients and
+// the qmm session server over the Unix domain socket. Messages are Go
 // values encoded with encoding/gob.
 package protocol
 
@@ -73,7 +73,7 @@ type Resize struct {
 // Detach asks the server to detach this client (equivalent of prefix+d).
 type Detach struct{}
 
-// Shutdown asks the server to terminate the whole session (cogito kill-server).
+// Shutdown asks the server to terminate the whole session (qmm kill-server).
 type Shutdown struct{}
 
 // ActionFocus requests keyboard focus on the pane containing cell (X, Y).

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func newHelpClient() *clientConn {
@@ -40,7 +40,7 @@ func TestPrefixQuestionOpensStyledHelp(t *testing.T) {
 	f := *c.frame
 	text := frameText(f)
 	for _, want := range []string{
-		"COGITO HELP", "PREFIX: Ctrl-a",
+		"QMM HELP", "PREFIX: Ctrl-a",
 		"PANES", "WINDOWS", "LAYOUT", "SESSION", "MOUSE",
 		"C-a ?", "Show this help", "Esc/q close",
 		"C-a z", "Floating zoom",
@@ -85,10 +85,10 @@ func TestHelpOverlayIsPerClient(t *testing.T) {
 	if c1.frame == nil || c2.frame == nil {
 		t.Fatal("broadcast did not render both client frames")
 	}
-	if !strings.Contains(frameText(*c1.frame), "COGITO HELP") {
+	if !strings.Contains(frameText(*c1.frame), "QMM HELP") {
 		t.Error("requesting client is missing the help overlay")
 	}
-	if strings.Contains(frameText(*c2.frame), "COGITO HELP") {
+	if strings.Contains(frameText(*c2.frame), "QMM HELP") {
 		t.Error("help overlay leaked to another attached client")
 	}
 }

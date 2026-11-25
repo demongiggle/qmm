@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/layout"
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/layout"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 const (
@@ -20,7 +20,7 @@ const (
 )
 
 // handleClientMessage dispatches one client message. It returns true when the
-// server should shut down (confirmed prefix+&, cogito kill-server, or a
+// server should shut down (confirmed prefix+&, qmm kill-server, or a
 // session-ending pane exit).
 func (s *Server) handleClientMessage(in clientMsg) bool {
 	c := in.cli
@@ -409,7 +409,7 @@ var prefixBindings = []prefixBinding{
 	prefixBind("n", func(s *Server, c *clientConn) { s.cycleWindow(1) }),
 	prefixBind("p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }),
 	prefixBind("x", func(s *Server, c *clientConn) { s.killActivePane() }),
-	// tmux uses prefix+& for a confirmed destructive close. cogito has one
+	// tmux uses prefix+& for a confirmed destructive close. qmm has one
 	// session, so the chord normally asks before shutting down the whole
 	// server; the settings page can turn that confirmation off.
 	prefixBind("&", func(s *Server, c *clientConn) {
@@ -509,7 +509,7 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 					// wait for more bytes
 				default:
 					c.clearRepeat()
-					c.enqueue(protocol.Notice{Text: "cogito: unbound prefix key"})
+					c.enqueue(protocol.Notice{Text: "qmm: unbound prefix key"})
 					c.prefixArmed = false
 					c.prefixBuf = nil
 				}

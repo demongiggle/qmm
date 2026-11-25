@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 type testClient struct {
@@ -119,7 +119,7 @@ func waitSocket(t *testing.T, sock string) {
 func TestServerLifecycle(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -151,11 +151,11 @@ func TestServerLifecycle(t *testing.T) {
 	}
 
 	// Type a marker into the shell; expect it to appear on screen.
-	if err := c.codec.Send(protocol.Input{Data: []byte("echo cogito-integration-marker\n")}); err != nil {
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo qmm-integration-marker\n")}); err != nil {
 		t.Fatalf("send input: %v", err)
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
-		return strings.Contains(frameText(f), "cogito-integration-marker")
+		return strings.Contains(frameText(f), "qmm-integration-marker")
 	})
 
 	// Split the pane; expect two panes in the frame metadata.
@@ -202,7 +202,7 @@ func TestServerLifecycle(t *testing.T) {
 
 func TestShutdownWithoutHandshake(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -210,7 +210,7 @@ func TestShutdownWithoutHandshake(t *testing.T) {
 	go func() { runErr <- Run(cfg) }()
 	waitSocket(t, sock)
 
-	// Send Shutdown as the very first message, like `cogito kill-server`.
+	// Send Shutdown as the very first message, like `qmm kill-server`.
 	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -233,7 +233,7 @@ func TestShutdownWithoutHandshake(t *testing.T) {
 
 func TestConcurrentServerStartup(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -292,7 +292,7 @@ func TestConcurrentServerStartup(t *testing.T) {
 
 func TestMultiClientMinSize(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -351,7 +351,7 @@ done:
 // resize, and window selection by index.
 func TestFocusDragAndResize(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -453,7 +453,7 @@ func TestFocusDragAndResize(t *testing.T) {
 func TestNewPaneAndWindowTakeFocus(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -527,7 +527,7 @@ func TestNewPaneAndWindowTakeFocus(t *testing.T) {
 // (byte -> prefix state machine -> tree resize).
 func TestPrefixArrowResize(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -581,7 +581,7 @@ func TestPrefixArrowResize(t *testing.T) {
 func TestDetachKeepsSession(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -651,7 +651,7 @@ func TestDetachKeepsSession(t *testing.T) {
 func TestPaneDeathCascadesSessionEnd(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -706,7 +706,7 @@ func TestPaneDeathCascadesSessionEnd(t *testing.T) {
 func TestToggleZoomViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -768,7 +768,7 @@ func TestToggleZoomViaPrefix(t *testing.T) {
 func TestTogglePaneZoomViaDoubleClickAction(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -831,7 +831,7 @@ func TestTogglePaneZoomViaDoubleClickAction(t *testing.T) {
 func TestHelpMenuViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -847,7 +847,7 @@ func TestHelpMenuViaPrefix(t *testing.T) {
 		t.Fatalf("prefix ?: %v", err)
 	}
 	help := c.waitForFrame(func(f protocol.Frame) bool {
-		return strings.Contains(frameText(f), "COGITO HELP")
+		return strings.Contains(frameText(f), "QMM HELP")
 	})
 	for _, want := range []string{"PANES", "WINDOWS", "LAYOUT", "SESSION", "MOUSE"} {
 		if !strings.Contains(frameText(help), want) {
@@ -859,7 +859,7 @@ func TestHelpMenuViaPrefix(t *testing.T) {
 		t.Fatalf("dismiss help: %v", err)
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
-		return f.Full && !strings.Contains(frameText(f), "COGITO HELP")
+		return f.Full && !strings.Contains(frameText(f), "QMM HELP")
 	})
 
 	if err := c.codec.Send(protocol.Input{Data: []byte("echo $((400+37))\n")}); err != nil {
@@ -888,7 +888,7 @@ func TestHelpMenuViaPrefix(t *testing.T) {
 func TestPrefixSplitBindings(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
-	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 

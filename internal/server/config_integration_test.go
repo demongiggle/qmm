@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/demongiggle/cogito/internal/protocol"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 func startConfigServer(t *testing.T, configPath string) (string, chan error) {
@@ -40,7 +40,7 @@ func TestConfigRecoveryWarnsOnlyFirstClient(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
-	t.Setenv("COGITO_CONFIG", configPath)
+	t.Setenv("QMM_CONFIG", configPath)
 	broken := "[appearance]\ncursor_shape = \"Triangle\"\n"
 	if err := os.WriteFile(configPath, []byte(broken), 0o600); err != nil {
 		t.Fatalf("write broken config: %v", err)
@@ -97,7 +97,7 @@ func TestConfigReloadViaPrefixAppliesToAllClients(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
-	t.Setenv("COGITO_CONFIG", configPath)
+	t.Setenv("QMM_CONFIG", configPath)
 	sock, runErr := startConfigServer(t, configPath)
 
 	c1 := dial(t, sock, 80, 24)
@@ -109,7 +109,7 @@ func TestConfigReloadViaPrefixAppliesToAllClients(t *testing.T) {
 		t.Fatalf("open settings: %v", err)
 	}
 	c1.waitForFrame(func(f protocol.Frame) bool {
-		return f.Full && strings.Contains(frameText(f), "COGITO SETTINGS")
+		return f.Full && strings.Contains(frameText(f), "QMM SETTINGS")
 	})
 
 	external := "[appearance]\ncursor_shape = \"Bar\"\ncursor_blink = \"On\"\n"
@@ -121,7 +121,7 @@ func TestConfigReloadViaPrefixAppliesToAllClients(t *testing.T) {
 	}
 	f1 := c1.waitForFrame(func(f protocol.Frame) bool {
 		return f.CursorShape == protocol.CursorShapeBar && f.CursorBlink &&
-			!strings.Contains(frameText(f), "COGITO SETTINGS")
+			!strings.Contains(frameText(f), "QMM SETTINGS")
 	})
 	if strings.Contains(frameText(f1), "CONFIGURATION WARNING") {
 		t.Error("successful reload unexpectedly showed a warning")
@@ -129,7 +129,7 @@ func TestConfigReloadViaPrefixAppliesToAllClients(t *testing.T) {
 	f2 := c2.waitForFrame(func(f protocol.Frame) bool {
 		return f.CursorShape == protocol.CursorShapeBar && f.CursorBlink
 	})
-	if strings.Contains(frameText(f2), "COGITO SETTINGS") {
+	if strings.Contains(frameText(f2), "QMM SETTINGS") {
 		t.Error("settings page leaked to the second client")
 	}
 
