@@ -97,6 +97,35 @@ go vet ./...
 go build -o cogito ./cmd/cogito
 ```
 
+## Manual smoke checklist
+
+Automated coverage lives in `go test ./...` (integration tests drive a real
+server over a unix socket). The interactive path is best checked by hand or
+under `script(1)`:
+
+```sh
+COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
+```
+
+- [ ] `cogito` starts a session: shell appears, status bar shows `0:<name>*` + clock
+- [ ] `Ctrl-a %` splits left/right; `Ctrl-a "` splits top/bottom; borders render
+- [ ] `Ctrl-a o` cycles panes; focus follows
+- [ ] `Ctrl-a z` zooms the active pane (1-cell margin box, `Z` flag in status bar), toggle restores
+- [ ] click a pane to focus it; click a window name in the status bar to switch windows
+- [ ] drag a border: the pane resizes live and stays after detach/reattach
+- [ ] `Ctrl-a c` opens a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates
+- [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
+- [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes the pane
+- [ ] kill the pane (`Ctrl-a x`): window closes; killing the last pane quits everything
+- [ ] `cogito kill-server` from another terminal shuts the session down
+- [ ] two attached clients: the smaller terminal wins (min-size); closing it grows the other to full size
+- [ ] tiny terminal (<40x10): shows "terminal too small" instead of garbage
+- [ ] `COGITO_DEBUG_LOG=/tmp/cogito.debug ./cogito` logs key/mouse events for troubleshooting
+
+Mouse events can be injected without a real mouse (SGR 1006): press at
+(col,row) is `ESC [ < 0 ; COL ; ROW M`, release is `... m`, motion with the
+button held is `... 32 ; COL ; ROW M` (coordinates 1-based).
+
 ## Limitations
 
 - Linux only
