@@ -29,7 +29,22 @@ detach/attach — nothing else yet.
 go build -o cogito ./cmd/cogito
 ```
 
-Requires Go 1.22+ and Linux (uses ptys and /proc).
+Requires Go 1.24+ and Linux (uses ptys and /proc).
+
+## Install
+
+```sh
+go install github.com/demongiggle/cogito/cmd/cogito@latest
+```
+
+`go install` places the binary in `$(go env GOBIN)` (or `$(go env GOPATH)/bin`);
+make sure that directory is on your `PATH`. To install a checkout instead:
+
+```sh
+go install ./cmd/cogito
+```
+
+The `server` subcommand is internal — the CLI spawns it automatically on first run.
 
 ## Usage
 
