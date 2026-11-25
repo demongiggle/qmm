@@ -231,35 +231,43 @@ func TestShutdownWithoutHandshake(t *testing.T) {
 func TestConcurrentServerStartup(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
 
 	// Two servers racing for the same socket dir: exactly one may win.
 	errs := make(chan error, 2)
 	go func() { errs <- Run(cfg) }()
 	go func() { errs <- Run(cfg) }()
 
-	var loserErr, winnerErr error
-	for i := 0; i < 2; i++ {
+	// Wait until the loser has failed and the winner is accepting.
+	var loserErr error
+	winnerUp := false
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && !(loserErr != nil && winnerUp) {
 		select {
 		case err := <-errs:
-			if err != nil {
-				loserErr = err
-			} else {
-				winnerErr = err // nil means clean shutdown
+			if err == nil {
+				t.Fatal("a server exited cleanly before shutdown was requested")
 			}
-		case <-time.After(2 * time.Second):
-			// No error yet: this is the winner, still running.
+			if loserErr == nil {
+				loserErr = err
+			}
+		default:
 		}
+		if c, err := net.DialTimeout("unix", sock, 100*time.Millisecond); err == nil {
+			_ = c.Close()
+			winnerUp = true
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
-
-	// Exactly one should have failed immediately with the lock error.
 	if loserErr == nil {
-		t.Fatal("expected one server to lose the race, got none")
+		t.Fatal("expected one server to lose the startup race, none did")
 	}
 	t.Logf("loser error: %v", loserErr)
-	_ = winnerErr
+	if !winnerUp {
+		t.Fatal("winning server never came up")
+	}
 
 	// The winner must be serving: shut it down via bare Shutdown.
-	sock := filepath.Join(dir, "default")
 	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
 	if err != nil {
 		t.Fatalf("winner not serving: %v", err)

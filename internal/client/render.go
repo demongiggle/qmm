@@ -87,14 +87,20 @@ func (a *attach) statusRow() int {
 func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	x, y := ev.Position()
 	// Ignore input outside the server-rendered area (e.g. when this
-	// terminal is bigger than the effective session size).
+	// terminal is bigger than the effective session size). A press there
+	// can never start a gesture; a release ends one.
 	if a.frameCols > 0 && a.frameRows > 0 && (x >= a.frameCols || y >= a.frameRows) {
-		if ev.Buttons()&tcell.ButtonPrimary == 0 {
+		primary := ev.Buttons()&tcell.ButtonPrimary != 0
+		switch {
+		case !primary:
 			a.mouseDown = false
 			if a.dragging {
 				_ = a.codec.Send(protocol.ActionDragEnd{Splitter: a.dragID})
 				a.dragging = false
 			}
+		case !a.dragging:
+			// Fresh press outside the frame: don't arm a gesture.
+			a.mouseDown = false
 		}
 		return
 	}
