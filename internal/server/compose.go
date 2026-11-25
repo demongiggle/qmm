@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/hinshun/vt10x"
@@ -60,6 +61,9 @@ type compositor struct {
 	helpTop  int
 
 	confirmOpen bool
+
+	displayPanes      bool
+	displayPanesInput string
 }
 
 func blankCell(row, col int) protocol.Cell {
@@ -81,12 +85,31 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	}
 
 	frame := protocol.Frame{Cols: cols, Rows: rows}
+	w := s.activeWindow()
+	paneNumbers := make(map[int]int)
+	for n, id := range s.windowPaneIDs(w) {
+		paneNumbers[id] = n
+	}
 	render := func() protocol.Frame {
 		if c.confirmOpen {
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)
 		} else if c.helpOpen {
 			c.drawHelp(&frame, setCell, cols, rows)
+		} else if c.displayPanes {
+			c.drawDisplayPanes(&frame, setCell, cols, rows)
 		}
+		// Keep pane metadata deterministic despite the layout's rect map.
+		// The client gives zoom overlays priority regardless of this order.
+		sort.SliceStable(frame.Panes, func(i, j int) bool {
+			a, b := frame.Panes[i], frame.Panes[j]
+			if a.Number != b.Number {
+				return a.Number < b.Number
+			}
+			if a.Zoomed != b.Zoomed {
+				return b.Zoomed
+			}
+			return a.ID < b.ID
+		})
 		return c.diff(cells, forceFull, frame)
 	}
 
@@ -104,7 +127,6 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	}
 
 	area := layout.Rect{X: 0, Y: 0, W: cols, H: rows - statusRows}
-	w := s.activeWindow()
 
 	var marks map[int]uint8 // cellIndex -> bitmask 1=vert 2=horiz
 
@@ -130,8 +152,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				frame.CursorVisible = cur.visible
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
-				ID: id, X: r.X, Y: r.Y, W: r.W, H: r.H,
-				Active: id == w.activePane && !w.zoomed,
+				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
+				Active: id == w.activePane && (!w.zoomed || c.displayPanes),
 			})
 		}
 
@@ -178,40 +200,45 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		}
 
 		if w.zoomed {
-			// Zoom is a floating overlay: the split panes and their borders
-			// remain visible in a 2% margin around all four sides.
-			outer, inner := zoomRects(area.W, area.H)
-			for y := outer.Y; y < outer.Bottom(); y++ {
-				for x := outer.X; x < outer.Right(); x++ {
-					setCell(x, y, ' ', colDefault, colDefault, 0)
-				}
-			}
-			p := s.panes[w.activePane]
-			if p != nil {
-				blitPane(setCell, p, inner)
-				cur := p.vtCursor()
-				frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
-				frame.CursorVisible = cur.visible
-			} else {
-				frame.CursorVisible = false
-			}
-			// Box border; corners are drawn with the horizontal edges, so
-			// the verticals skip them.
-			x0, y0 := outer.X, outer.Y
-			x1, y1 := outer.Right()-1, outer.Bottom()-1
-			for x := x0; x <= x1; x++ {
-				setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), colBorderActive, colDefault, 0)
-				setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), colBorderActive, colDefault, 0)
-			}
-			for y := y0 + 1; y < y1; y++ {
-				setCell(x0, y, '│', colBorderActive, colDefault, 0)
-				setCell(x1, y, '│', colBorderActive, colDefault, 0)
-			}
-			frame.Panes = append(frame.Panes, protocol.PaneRect{
-				ID: w.activePane, X: outer.X, Y: outer.Y,
-				W: outer.W, H: outer.H, Active: true, Zoomed: true,
-			})
 			frame.Splitters = nil // the overlay covers the drag handles
+			// While pane numbers are visible, show the underlying split
+			// layout for this client instead of the floating zoom overlay.
+			// Session PTY sizes stay unchanged; the display is transient.
+			if !c.displayPanes {
+				// Zoom is a floating overlay: the split panes and their borders
+				// remain visible in a 2% margin around all four sides.
+				outer, inner := zoomRects(area.W, area.H)
+				for y := outer.Y; y < outer.Bottom(); y++ {
+					for x := outer.X; x < outer.Right(); x++ {
+						setCell(x, y, ' ', colDefault, colDefault, 0)
+					}
+				}
+				p := s.panes[w.activePane]
+				if p != nil {
+					blitPane(setCell, p, inner)
+					cur := p.vtCursor()
+					frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
+					frame.CursorVisible = cur.visible
+				} else {
+					frame.CursorVisible = false
+				}
+				// Box border; corners are drawn with the horizontal edges, so
+				// the verticals skip them.
+				x0, y0 := outer.X, outer.Y
+				x1, y1 := outer.Right()-1, outer.Bottom()-1
+				for x := x0; x <= x1; x++ {
+					setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), colBorderActive, colDefault, 0)
+					setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), colBorderActive, colDefault, 0)
+				}
+				for y := y0 + 1; y < y1; y++ {
+					setCell(x0, y, '│', colBorderActive, colDefault, 0)
+					setCell(x1, y, '│', colBorderActive, colDefault, 0)
+				}
+				frame.Panes = append(frame.Panes, protocol.PaneRect{
+					ID: w.activePane, Number: paneNumbers[w.activePane], X: outer.X, Y: outer.Y,
+					W: outer.W, H: outer.H, Active: true, Zoomed: true,
+				})
+			}
 		}
 	}
 

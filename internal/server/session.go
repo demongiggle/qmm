@@ -70,6 +70,18 @@ func (s *session) sortedWindowIndices() []int {
 	return idx
 }
 
+// windowPaneIDs returns a window's live pane IDs in creation order. Pane IDs
+// are never reused, so sorting gives stable numbers for prefix+q within a
+// window even after nested splits.
+func (s *session) windowPaneIDs(w *window) []int {
+	if w == nil || w.tree == nil {
+		return nil
+	}
+	ids := w.tree.Panes()
+	sort.Ints(ids)
+	return ids
+}
+
 func (s *session) activeWindow() *window { return s.windows[s.active] }
 
 // lowestFreeIndex returns the smallest non-negative unused window index.

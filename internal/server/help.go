@@ -30,6 +30,7 @@ var helpSections = []helpSection{
 			{"C-a |", "Split left/right"},
 			{"C-a -", "Split top/bottom"},
 			{"C-a o", "Next pane"},
+			{"C-a q", "Show pane numbers / jump"},
 			{"C-a x", "Close pane"},
 		},
 	},

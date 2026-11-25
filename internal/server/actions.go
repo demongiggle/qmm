@@ -34,6 +34,16 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
+	// While pane numbers are shown, mouse/action messages dismiss the
+	// transient overlay instead of focusing or resizing panes underneath it.
+	if c.displayPanesOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			s.closeDisplayPanes(c)
+			return false
+		}
+	}
 	// While help is open, mouse/action messages dismiss the overlay instead
 	// of reaching the panes underneath. Input and control messages are
 	// handled below.
@@ -377,6 +387,8 @@ var prefixBindings = []prefixBinding{
 	// session, so the chord asks before shutting down the whole server.
 	prefixBind("&", func(s *Server, c *clientConn) { s.openShutdownConfirm(c) }),
 	prefixBind("o", func(s *Server, c *clientConn) { s.cyclePane() }),
+	// tmux-style display-panes: number every pane, then accept the number.
+	prefixBind("q", func(s *Server, c *clientConn) { s.openDisplayPanes(c) }),
 	prefixBind("z", func(s *Server, c *clientConn) { s.toggleZoom() }),
 	prefixBind("d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }),
 	prefixBind("?", func(s *Server, c *clientConn) { s.toggleHelp(c) }),
@@ -405,6 +417,15 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 	if c.confirmOpen {
 		c.clearRepeat()
 		s.handleShutdownConfirmInput(c, data)
+		return
+	}
+	// A number typed after the overlay's timeout belongs to the pane again.
+	if c.displayPanesOpen && s.displayPanesExpired(c) {
+		s.expireDisplayPanesFor(c)
+	}
+	if c.displayPanesOpen {
+		c.clearRepeat()
+		s.handleDisplayPanesInput(c, data)
 		return
 	}
 	if c.helpOpen {

@@ -15,6 +15,8 @@ detach/attach — nothing else yet.
   highlighted, `*` marker, `Z` when zoomed)
 - Creating a pane or window focuses it immediately, so typing goes to the
   new shell
+- **Pane numbers** (`prefix` `q`): show a large number in each pane, then
+  press that number to focus the pane (tmux-style `display-panes`)
 - **Detach / reattach**: the session lives in a background server; close the
   terminal and `cogito attach` brings everything back
 - **Mouse**: click to focus a pane, double-click to zoom it, click a window in
@@ -80,6 +82,7 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `c`      | New window                          |
 | `prefix` `n` / `p`| Next / previous window              |
 | `prefix` `o`      | Cycle to next pane                  |
+| `prefix` `q`      | Show pane numbers / jump to pane   |
 | `prefix` `x`      | Kill current pane                   |
 | `prefix` `&`      | Shut down session (confirm)          |
 | `prefix` `z`      | Toggle floating pane zoom           |
@@ -96,6 +99,16 @@ held and press an arrow again within half a second to resize another step
 without another prefix. A different Ctrl-arrow works in the same repeat
 window; any other key, a new prefix, or the timeout ends it and returns
 Ctrl-arrow input to the pane.
+
+`prefix` `q` is tmux-style `display-panes`: a large, color-coded number
+appears in each pane and the status bar hints at the range. Press the number
+to focus that pane; `Esc`, `q`, `Ctrl-c`, or any other non-number key cancels
+(and is swallowed). The overlay is local to the attached client and clears
+itself after about two seconds. Numbers are zero-based and follow pane
+creation order. With more than ten panes, a first digit that could begin a
+two-digit number waits briefly: type the next digit, press Enter to accept
+the first digit, or wait for it to be selected automatically. Jumping to a
+hidden pane from a zoomed window restores the split layout.
 
 Like tmux's destructive `&` chord, `prefix` `&` opens a modal confirmation
 dialog before ending cogito's single session. Press `y` (or Enter) to shut
@@ -164,6 +177,7 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] active pane border, active window tab, and `Ctrl-a ?` help are color-coded
 - [ ] `Ctrl-a |` splits left/right; `Ctrl-a -` splits top/bottom; the new pane takes focus
 - [ ] `Ctrl-a o` cycles panes; focus follows
+- [ ] `Ctrl-a q` numbers every pane; `0`/`1` jumps there and clears the overlay
 - [ ] `Ctrl-a z` floats the active pane (centered, at least 2% margins, `Z` flag), toggle restores
 - [ ] double-click a pane zooms it; double-click the floating pane restores the split
 - [ ] click a pane to focus it; click a window name in the status bar to switch windows

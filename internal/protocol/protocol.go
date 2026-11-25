@@ -149,10 +149,13 @@ type Cell struct {
 }
 
 // PaneRect describes where a pane is rendered on screen (for client hit-testing).
-// Zoomed marks the floating overlay in a zoomed window; the underlying split
-// panes are also reported so they remain visible double-click targets.
+// Number is the pane's zero-based index within its window, as shown by
+// prefix+q. Zoomed marks the floating overlay in a zoomed window; the
+// underlying split panes are also reported so they remain visible
+// double-click targets.
 type PaneRect struct {
 	ID         int
+	Number     int
 	X, Y, W, H int
 	Active     bool
 	Zoomed     bool

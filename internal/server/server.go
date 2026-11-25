@@ -104,6 +104,12 @@ type clientConn struct {
 	// Shutdown confirmation is local to the client that pressed prefix+&.
 	confirmOpen bool
 
+	// prefix+q shows transient pane numbers on one client. The input buffer
+	// permits two-digit pane numbers when a window has more than ten panes.
+	displayPanesOpen     bool
+	displayPanesInput    string
+	displayPanesDeadline time.Time
+
 	// Prefix-key state machine.
 	prefixArmed bool
 	prefixAt    time.Time
@@ -182,6 +188,8 @@ func Run(cfg Config) error {
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	displayTicker := time.NewTicker(displayPanesExpireInterval)
+	defer displayTicker.Stop()
 
 	for {
 		var shutdown bool
@@ -201,6 +209,8 @@ func Run(cfg Config) error {
 		case <-ticker.C:
 			s.refreshWindowNames()
 			s.broadcast()
+		case <-displayTicker.C:
+			s.expireDisplayPanes()
 		}
 		if shutdown {
 			s.teardown("session ended")
@@ -414,6 +424,8 @@ func (s *Server) broadcast() {
 		c.comp.helpOpen = c.helpOpen
 		c.comp.helpTop = c.helpTop
 		c.comp.confirmOpen = c.confirmOpen
+		c.comp.displayPanes = c.displayPanesOpen
+		c.comp.displayPanesInput = c.displayPanesInput
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
 		c.forceFull = false
 		c.helpTop = c.comp.helpTop

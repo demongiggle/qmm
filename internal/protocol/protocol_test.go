@@ -35,7 +35,7 @@ func TestRoundTrip(t *testing.T) {
 				{Row: 0, Col: 1, Ch: 'B', FG: RGBColor(18, 52, 86), BG: ColorDefault},
 			},
 			CursorX: 1, CursorY: 0, CursorVisible: true,
-			Panes:     []PaneRect{{ID: 1, X: 0, Y: 0, W: 2, H: 1, Active: true, Zoomed: true}},
+			Panes:     []PaneRect{{ID: 1, Number: 4, X: 0, Y: 0, W: 2, H: 1, Active: true, Zoomed: true}},
 			Splitters: []Splitter{{ID: 9, X: 1, Y: 0, Len: 1, Vertical: true}},
 			Tabs:      []Tab{{Index: 0, Start: 0, End: 5, Name: "bash", Active: true, Zoomed: true}},
 		},
