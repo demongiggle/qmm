@@ -84,7 +84,10 @@ Mouse: click a pane to focus it, double-click it to toggle floating zoom,
 click a window name in the status bar to switch windows, drag a pane border
 to resize. Help is scrollable on short terminals with ↑/↓ or PgUp/PgDn.
 
-Config: none. Set COGITO_SOCKET_DIR to customize the socket location.
+Config: $XDG_CONFIG_HOME/cogito/config.toml (or ~/.config/cogito/config.toml).
+Set COGITO_CONFIG to override the full file path; settings changes save
+automatically and r / Ctrl-r in Ctrl-a s reloads external edits.
+Set COGITO_SOCKET_DIR to customize the socket location.
 `, version)
 }
 

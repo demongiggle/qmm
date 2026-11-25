@@ -29,10 +29,10 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	text := frameText(f)
 	for _, want := range []string{
 		"COGITO SETTINGS", "Appearance", "Panes", "Layout", "Session",
-		"Status bar clock", "Active pane border", "Pane number timeout",
-		"Double-click zoom", "Keyboard resize step", "Automatic window names",
-		"Confirm shutdown", "[On]", "[Green]", "[2s]", "[2 cells]",
-		"↑/↓", "q/Esc close",
+		"Status bar clock", "Active pane border", "Cursor shape", "Cursor blink",
+		"Pane number timeout", "Double-click zoom", "Keyboard resize step",
+		"Automatic window names", "Confirm shutdown", "[On]", "[Green]",
+		"[Block]", "[Off]", "[2s]", "[2 cells]", "r reload", "q/Esc close",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("settings frame missing %q:\n%s", want, text)
@@ -98,7 +98,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 	s, c := newHelpServer(40, 10)
 	fireBinding(s, c, "s")
 	text := frameText(*c.frame)
-	for _, want := range []string{"COGITO SETTINGS", "↑/↓", "q/Esc close", "1-"} {
+	for _, want := range []string{"COGITO SETTINGS", "↑/↓", "r reload", "q close", "1-"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("small settings frame missing %q:\n%s", want, text)
 		}
@@ -191,6 +191,23 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 		}
 		if got := cellAt(f, 0, 23).BG; got != 39 {
 			t.Fatalf("active tab BG = %d, want cyan 39", got)
+		}
+	})
+
+	t.Run("cursor shape and blink", func(t *testing.T) {
+		s := newTestSession()
+		f := (&compositor{}).compose(s, 80, 24, true)
+		if f.CursorShape != protocol.CursorShapeBlock || f.CursorBlink {
+			t.Fatalf("default cursor = shape:%d blink:%v, want steady block", f.CursorShape, f.CursorBlink)
+		}
+		s.opts().setByID(settingCursorShape, 2)
+		s.opts().setByID(settingCursorBlink, 0)
+		f = (&compositor{settingsOpen: true}).compose(s, 80, 24, true)
+		if f.CursorShape != protocol.CursorShapeBar || !f.CursorBlink {
+			t.Fatalf("configured cursor = shape:%d blink:%v, want blinking bar", f.CursorShape, f.CursorBlink)
+		}
+		if f.CursorVisible {
+			t.Error("settings overlay should hide the pane cursor")
 		}
 	})
 

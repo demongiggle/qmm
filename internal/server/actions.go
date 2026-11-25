@@ -24,6 +24,16 @@ const (
 // session-ending pane exit).
 func (s *Server) handleClientMessage(in clientMsg) bool {
 	c := in.cli
+	// A config recovery warning is modal: only lifecycle and input messages
+	// are handled. Everything else is swallowed rather than changing the
+	// session underneath the warning.
+	if c.configWarningOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			return false
+		}
+	}
 	// While the shutdown dialog is open, only lifecycle and input messages
 	// are handled. Mouse/action messages are swallowed rather than changing
 	// the session underneath the pending decision.
@@ -439,6 +449,11 @@ func (s *Server) writeRaw(c *clientConn, data []byte) {
 }
 
 func (s *Server) handleInput(c *clientConn, data []byte) {
+	if c.configWarningOpen {
+		c.clearRepeat()
+		s.handleConfigWarningInput(c, data)
+		return
+	}
 	if c.confirmOpen {
 		c.clearRepeat()
 		s.handleShutdownConfirmInput(c, data)

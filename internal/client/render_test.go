@@ -125,7 +125,7 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 
 	a.applyFrame(protocol.Frame{
 		Full: true, Cols: 3, Rows: 1, Cells: base,
-		CursorX: 1, CursorY: 0, CursorVisible: true,
+		CursorX: 1, CursorY: 0, CursorVisible: true, CursorBlink: true,
 	})
 	screen.Show()
 	if got := screenStyleAt(t, screen, 1, 0); got != caretOn {
@@ -138,7 +138,7 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 		changed.Ch = rune('a' + i)
 		a.applyFrame(protocol.Frame{
 			Cols: 3, Rows: 1, Cells: []protocol.Cell{changed},
-			CursorX: 1, CursorY: 0, CursorVisible: true,
+			CursorX: 1, CursorY: 0, CursorVisible: true, CursorBlink: true,
 		})
 		screen.Show()
 		if a.caretBlinkOff {
@@ -162,7 +162,7 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 		a.applyFrame(protocol.Frame{
 			Cols: 3, Rows: 1,
 			Cells:   []protocol.Cell{{Row: 0, Col: 2, Ch: rune('0' + i), FG: 46, BG: 236}},
-			CursorX: 1, CursorY: 0, CursorVisible: true,
+			CursorX: 1, CursorY: 0, CursorVisible: true, CursorBlink: true,
 		})
 		screen.Show()
 		if got := screenStyleAt(t, screen, 1, 0); got != caretOff {
@@ -177,7 +177,7 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 	}
 
 	// An application-hidden cursor removes the software caret entirely.
-	a.applyFrame(protocol.Frame{Cols: 3, Rows: 1, CursorVisible: false})
+	a.applyFrame(protocol.Frame{Cols: 3, Rows: 1, CursorVisible: false, CursorBlink: true})
 	screen.Show()
 	if got := screenStyleAt(t, screen, 1, 0); got != caretOff {
 		t.Errorf("hidden caret style = %#v, want %#v", got, caretOff)

@@ -53,6 +53,10 @@ type Server struct {
 	sock string
 	pid  string
 
+	configPath           string
+	configLogPath        string
+	pendingConfigWarning *configWarning
+
 	sess *session
 	cols int
 	rows int
@@ -104,6 +108,12 @@ type clientConn struct {
 	// Shutdown confirmation is local to the client that pressed prefix+&.
 	confirmOpen bool
 
+	// Config recovery warnings are local. A startup warning is shown once to
+	// the first attached client; runtime failures target their triggering
+	// client.
+	configWarning     configWarning
+	configWarningOpen bool
+
 	// prefix+q shows transient pane numbers on one client. The input buffer
 	// permits two-digit pane numbers when a window has more than ten panes.
 	displayPanesOpen     bool
@@ -150,6 +160,7 @@ func Run(cfg Config) error {
 		return err
 	}
 	s.sock = sock
+	s.initConfig(filepath.Join(filepath.Dir(sock), "server.log"))
 
 	// Serialize concurrent server starts with a lock file held for the
 	// server's lifetime. This prevents two daemons from racing to bind
@@ -273,6 +284,10 @@ func (s *Server) registerClient(c *clientConn) {
 	s.clients[c] = struct{}{}
 	if s.recomputeSize() {
 		s.relayout()
+	}
+	if s.pendingConfigWarning != nil {
+		s.showConfigWarning(c, *s.pendingConfigWarning)
+		s.pendingConfigWarning = nil
 	}
 	// Welcome carries the effective size; the following frames tell the rest.
 	_ = c.codec.Send(protocol.Welcome{Cols: s.cols, Rows: s.rows})
@@ -430,6 +445,8 @@ func (s *Server) broadcast() {
 		c.comp.helpOpen = c.helpOpen
 		c.comp.helpTop = c.helpTop
 		c.comp.confirmOpen = c.confirmOpen
+		c.comp.configWarning = c.configWarning
+		c.comp.configWarningOpen = c.configWarningOpen
 		c.comp.displayPanes = c.displayPanesOpen
 		c.comp.displayPanesInput = c.displayPanesInput
 		c.comp.settingsOpen = c.settingsOpen

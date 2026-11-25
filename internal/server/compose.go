@@ -62,6 +62,9 @@ type compositor struct {
 
 	confirmOpen bool
 
+	configWarning     configWarning
+	configWarningOpen bool
+
 	displayPanes      bool
 	displayPanesInput string
 
@@ -88,9 +91,14 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		cells[y*cols+x] = protocol.Cell{Row: y, Col: x, Ch: ch, FG: fg, BG: bg, Style: style}
 	}
 
-	frame := protocol.Frame{Cols: cols, Rows: rows}
-	w := s.activeWindow()
 	opts := s.opts()
+	frame := protocol.Frame{
+		Cols:        cols,
+		Rows:        rows,
+		CursorShape: opts.cursorShape(),
+		CursorBlink: opts.cursorBlink(),
+	}
+	w := s.activeWindow()
 	showClock := opts.showClock()
 	activeColor := opts.borderColor()
 	paneNumbers := make(map[int]int)
@@ -98,7 +106,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		paneNumbers[id] = n
 	}
 	render := func() protocol.Frame {
-		if c.confirmOpen {
+		if c.configWarningOpen {
+			c.drawConfigWarning(&frame, setCell, cols, rows, c.configWarning)
+		} else if c.confirmOpen {
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)
 		} else if c.helpOpen {
 			c.drawHelp(&frame, setCell, cols, rows)

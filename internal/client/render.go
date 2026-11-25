@@ -15,6 +15,11 @@ const (
 	// caretBlinkInterval is the half-cycle of the client-owned software
 	// caret. It is deliberately independent of pane output and frame rate.
 	caretBlinkInterval = 500 * time.Millisecond
+
+	// caretBarOverlay is a combining vertical stroke that preserves the
+	// underlying glyph. Terminals that cannot display it use caretBarFallback.
+	caretBarOverlay  = '\u20d2'
+	caretBarFallback = '▏'
 )
 
 // paneClick records a completed or pending click on a pane hit target.
@@ -43,6 +48,8 @@ type attach struct {
 	caretX        int
 	caretY        int
 	caretVisible  bool
+	caretShape    uint8
+	caretBlink    bool
 	caretBlinkOff bool // zero value means the software caret is lit
 	caretDrawn    bool
 	drawnCaretX   int
@@ -141,11 +148,15 @@ func (a *attach) inGrid(x, y int) bool {
 	return x >= 0 && y >= 0 && x < a.gridCols && y < a.gridRows
 }
 
-func (a *attach) setScreenCell(c protocol.Cell) {
+func (a *attach) setScreenCellStyled(c protocol.Cell, combining []rune, style tcell.Style) {
 	if !a.inGrid(c.Col, c.Row) {
 		return
 	}
-	a.screen.SetContent(c.Col, c.Row, cellRune(c.Ch), nil, styleOf(c))
+	a.screen.SetContent(c.Col, c.Row, cellRune(c.Ch), combining, style)
+}
+
+func (a *attach) setScreenCell(c protocol.Cell) {
+	a.setScreenCellStyled(c, nil, styleOf(c))
 }
 
 // paintCell restores one unadorned cell, including the trailing cell that
@@ -173,7 +184,7 @@ func (a *attach) clearCaret() {
 }
 
 func (a *attach) drawCaret() {
-	if a.caretDrawn || !a.caretVisible || a.caretBlinkOff {
+	if a.caretDrawn || !a.caretVisible || (a.caretBlink && a.caretBlinkOff) {
 		return
 	}
 	x, y := a.caretX, a.caretY
@@ -182,11 +193,33 @@ func (a *attach) drawCaret() {
 	}
 	c := a.grid[y*a.gridCols+x]
 	c.Row, c.Col = y, x
-	// Invert the cell's displayed colors regardless of whether the pane
-	// already marked it reverse-video. Clearing text blink keeps the caret's
-	// on phase steady; the underlying cell regains blink on the off phase.
-	c.Style = (c.Style &^ protocol.StyleBlink) ^ protocol.StyleReverse
-	a.setScreenCell(c)
+	// Clearing text blink keeps the caret's on phase steady; the underlying
+	// cell regains blink on the off phase.
+	c.Style &^= protocol.StyleBlink
+	switch a.caretShape {
+	case protocol.CursorShapeUnderline:
+		style := styleOf(c)
+		if c.Style&protocol.StyleUnderline != 0 {
+			style = style.Underline(tcell.UnderlineStyleDouble)
+		} else {
+			style = style.Underline(tcell.UnderlineStyleSolid)
+		}
+		a.setScreenCellStyled(c, nil, style)
+	case protocol.CursorShapeBar:
+		if a.screen.CanDisplay(caretBarOverlay, false) {
+			a.setScreenCellStyled(c, []rune{caretBarOverlay}, styleOf(c))
+		} else {
+			fallback := c
+			fallback.Ch = caretBarFallback
+			fallback.Style ^= protocol.StyleReverse
+			a.setScreenCell(fallback)
+		}
+	default: // CursorShapeBlock
+		// Invert the cell's displayed colors regardless of whether the pane
+		// already marked it reverse-video.
+		c.Style ^= protocol.StyleReverse
+		a.setScreenCell(c)
+	}
 	if wideCell(c.Ch) && x+1 < a.gridCols {
 		next := a.grid[y*a.gridCols+x+1]
 		next.Row, next.Col = y, x+1
@@ -201,12 +234,15 @@ func (a *attach) refreshCaret() {
 	a.drawCaret()
 }
 
-// blinkCaret advances the software caret's fixed-rate phase. Its return
-// value reports whether a visible cell repaint should be flushed.
+// blinkCaret advances the software caret's fixed-rate phase. A steady caret
+// never requests a repaint, and hidden cursors never advance the phase.
 func (a *attach) blinkCaret() bool {
+	if !a.caretBlink || !a.caretVisible {
+		return false
+	}
 	a.caretBlinkOff = !a.caretBlinkOff
 	a.refreshCaret()
-	return a.caretVisible
+	return true
 }
 
 func (a *attach) applyFrame(f protocol.Frame) {
@@ -231,9 +267,19 @@ func (a *attach) applyFrame(f protocol.Frame) {
 		a.grid[c.Row*a.gridCols+c.Col] = c
 		a.setScreenCell(c)
 	}
+	wasVisible := a.caretVisible
+	styleChanged := a.caretShape != f.CursorShape || a.caretBlink != f.CursorBlink
 	a.clearCaret()
 	a.caretVisible = f.CursorVisible
 	a.caretX, a.caretY = f.CursorX, f.CursorY
+	a.caretShape = f.CursorShape
+	a.caretBlink = f.CursorBlink
+	// Style changes, a steady caret, and a cursor returning from an
+	// application-hidden state all start on the lit phase. Ordinary output
+	// frames leave a blinking caret's phase untouched.
+	if styleChanged || (!wasVisible && a.caretVisible) || !a.caretBlink {
+		a.caretBlinkOff = false
+	}
 	a.drawCaret()
 	a.frame = f
 }

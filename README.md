@@ -12,9 +12,9 @@ work into windows, move with the keyboard or the mouse, and detach while your
 shells keep running. Reattach and your layout is right where you left it.
 
 Built for people who live in the shell, cogito keeps setup out of the way:
-one binary, no configuration file to maintain, categorized help on demand,
-and an interactive settings page when you want to tune the experience. It is
-an early, deliberately small implementation focused on the essentials.
+one binary, an automatically managed TOML config file, categorized help on
+demand, and an interactive settings page when you want to tune the experience.
+It is an early, deliberately small implementation focused on the essentials.
 
 [Quick start](#quick-start) · [Why cogito](#why-cogito) ·
 [Keyboard and mouse](#keyboard-and-mouse) · [Under the hood](#under-the-hood) ·
@@ -136,13 +136,28 @@ to close it. The menu is local to the attached client.
 
 `Ctrl-a` `s` opens a categorized, scrollable settings page. Use `↑` / `↓`
 (or `j` / `k`), `PgUp` / `PgDn`, `Home` / `End`, or `g` / `G` to move; press
-`←` / `→` (or `h` / `l`), Enter, Space, or Tab to cycle a value. Press `q`,
-`Esc`, `Ctrl-c`, `s`, or `Ctrl-a` `s` to close.
+`←` / `→` (or `h` / `l`), Enter, Space, or Tab to cycle a value. Press `r` or
+`Ctrl-r` to reload external config edits, or `q`, `Esc`, `Ctrl-c`, `s`, or
+`Ctrl-a` `s` to close.
 
-Tune the status clock, active border color, pane-number timeout, double-click
-zoom, keyboard resize step, automatic window names, and shutdown confirmation.
-Values are shared by all attached clients for the server's lifetime. They are
-kept in memory, not written to a config file, and reset when the server exits.
+Tune nine values: the status clock, active border color, cursor shape
+(`Block`, `Underline`, or `Bar`), cursor blink, pane-number timeout,
+double-click zoom, keyboard resize step, automatic window names, and shutdown
+confirmation. The default caret is a steady block; turn **Cursor blink** on for
+the 500 ms blink cycle. **Bar** is a best-effort combining overlay that keeps
+the underlying pane text visible. Applications still control cursor visibility;
+DECSCUSR style requests are ignored.
+
+Values are shared by all attached clients for the server's lifetime and are
+saved immediately to `$XDG_CONFIG_HOME/cogito/config.toml` (or
+`~/.config/cogito/config.toml`); `COGITO_CONFIG` overrides the full file path.
+The file is created with defaults on first server start and read on later
+starts. Missing keys use defaults and unknown keys are ignored. A successful
+`r` / `Ctrl-r` reload applies external edits to every client and closes the
+settings page. If the file is broken, cogito backs it up as
+`config.toml.<timestamp>.bak`, writes a fresh default, logs the reason and paths
+in `server.log`, and shows a one-time warning dialog on the first attached
+client.
 
 ### Mouse shortcuts
 
@@ -186,9 +201,12 @@ to clients. Clients stay thin: they draw cells and forward input.
 The server socket lives in `$COGITO_SOCKET_DIR/default`,
 `$XDG_RUNTIME_DIR/cogito-<uid>/default`, or
 `/tmp/cogito-<uid>/default`. Server logs are written to `server.log` next to
-the socket. Environment variables:
+the socket. Settings live in `$XDG_CONFIG_HOME/cogito/config.toml` or
+`~/.config/cogito/config.toml`; `COGITO_CONFIG` replaces that path with a full
+file path. Environment variables:
 
 - `COGITO_SOCKET_DIR` — override the socket directory, useful for testing
+- `COGITO_CONFIG` — override the full config file path, useful for testing
 - `COGITO_DEBUG_LOG` — append client-side input events to this file
 
 ## Development
@@ -224,7 +242,10 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] `Ctrl-a c` opens and focuses a window; `Ctrl-a n` / `p` switch; status bar updates
 - [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
-- [ ] `Ctrl-a s` opens categorized settings; arrows scroll and `←` / `→` change a visible setting
+- [ ] `Ctrl-a s` opens categorized settings; arrows scroll, `←` / `→` changes a value, and `r` / `Ctrl-r` reloads the config
+- [ ] settings page shows **Cursor shape** and **Cursor blink**; Block / Underline / Bar and blink On / Off change the software caret
+- [ ] settings changes survive a server restart; external TOML edits take effect after `r` / `Ctrl-r` and update all attached clients
+- [ ] a broken config file produces a timestamped `.bak`, a fresh default, a first-client warning dialog, and a `server.log` entry
 - [ ] `Ctrl-a &` opens shutdown confirmation; `n` / `Esc` cancels; `y` ends the server
 - [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes; holding Ctrl and repeating the arrow resizes without another prefix
 - [ ] kill the pane (`Ctrl-a x`): window closes; killing the last pane quits everything
@@ -246,8 +267,8 @@ session** and:
 
 - Runs on Linux only
 - Has no scrollback or copy mode
-- Has no persisted config file, plugins, or full theming; settings are
-  session-only
+- Has a small persisted TOML config file, but no plugins or full theming
+- Has no window renaming or reordering
 - Has no window renaming or reordering
 
 That focus is the point: a compact Go codebase, a single binary, and a

@@ -23,6 +23,7 @@ func hasStyledCellAt(f protocol.Frame, x, y int, ch rune, fg int32) bool {
 func TestSettingsPageViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 

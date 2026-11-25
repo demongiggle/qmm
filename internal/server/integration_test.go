@@ -119,6 +119,7 @@ func waitSocket(t *testing.T, sock string) {
 func TestServerLifecycle(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -201,6 +202,7 @@ func TestServerLifecycle(t *testing.T) {
 
 func TestShutdownWithoutHandshake(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -231,6 +233,7 @@ func TestShutdownWithoutHandshake(t *testing.T) {
 
 func TestConcurrentServerStartup(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -289,6 +292,7 @@ func TestConcurrentServerStartup(t *testing.T) {
 
 func TestMultiClientMinSize(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -347,6 +351,7 @@ done:
 // resize, and window selection by index.
 func TestFocusDragAndResize(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -448,6 +453,7 @@ func TestFocusDragAndResize(t *testing.T) {
 func TestNewPaneAndWindowTakeFocus(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -521,6 +527,7 @@ func TestNewPaneAndWindowTakeFocus(t *testing.T) {
 // (byte -> prefix state machine -> tree resize).
 func TestPrefixArrowResize(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -574,6 +581,7 @@ func TestPrefixArrowResize(t *testing.T) {
 func TestDetachKeepsSession(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -643,6 +651,7 @@ func TestDetachKeepsSession(t *testing.T) {
 func TestPaneDeathCascadesSessionEnd(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -697,6 +706,7 @@ func TestPaneDeathCascadesSessionEnd(t *testing.T) {
 func TestToggleZoomViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -758,6 +768,7 @@ func TestToggleZoomViaPrefix(t *testing.T) {
 func TestTogglePaneZoomViaDoubleClickAction(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -820,6 +831,7 @@ func TestTogglePaneZoomViaDoubleClickAction(t *testing.T) {
 func TestHelpMenuViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 
@@ -876,6 +888,7 @@ func TestHelpMenuViaPrefix(t *testing.T) {
 func TestPrefixSplitBindings(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 

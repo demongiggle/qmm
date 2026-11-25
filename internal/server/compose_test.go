@@ -234,3 +234,27 @@ func TestZoomRectsKeepCenteredTwoPercentMargins(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
+	s := newTestSession()
+	s.opts().setByID(settingCursorShape, 2)
+	s.opts().setByID(settingCursorBlink, 0)
+	comp := &compositor{}
+
+	full := comp.compose(s, 80, 24, true)
+	if full.CursorShape != protocol.CursorShapeBar || !full.CursorBlink {
+		t.Fatalf("full frame cursor = shape:%d blink:%v, want blinking bar", full.CursorShape, full.CursorBlink)
+	}
+	incremental := comp.compose(s, 80, 24, false)
+	if incremental.CursorShape != protocol.CursorShapeBar || !incremental.CursorBlink {
+		t.Fatalf("incremental frame cursor = shape:%d blink:%v, want blinking bar", incremental.CursorShape, incremental.CursorBlink)
+	}
+	comp.settingsOpen = true
+	overlay := comp.compose(s, 80, 24, true)
+	if overlay.CursorShape != protocol.CursorShapeBar || !overlay.CursorBlink {
+		t.Fatalf("overlay frame cursor = shape:%d blink:%v, want blinking bar", overlay.CursorShape, overlay.CursorBlink)
+	}
+	if overlay.CursorVisible {
+		t.Error("settings overlay should hide the pane cursor")
+	}
+}

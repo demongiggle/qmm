@@ -14,6 +14,7 @@ import (
 func TestPrefixAmpersandShutdownRequiresConfirmation(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
+	t.Setenv("COGITO_CONFIG", dir+"/config.toml")
 	cfg := Config{SocketDir: dir}
 	sock := filepath.Join(dir, "default")
 

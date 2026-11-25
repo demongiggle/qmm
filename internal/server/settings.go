@@ -21,6 +21,8 @@ type settingID string
 const (
 	settingStatusClock     settingID = "status_clock"
 	settingBorderColor     settingID = "border_color"
+	settingCursorShape     settingID = "cursor_shape"
+	settingCursorBlink     settingID = "cursor_blink"
 	settingPaneNumberTime  settingID = "pane_number_time"
 	settingDoubleClickZoom settingID = "double_click_zoom"
 	settingResizeStep      settingID = "resize_step"
@@ -33,6 +35,13 @@ var (
 
 	borderColorNames = []string{"Green", "Cyan", "Yellow", "Magenta"}
 	borderColorCodes = []int32{46, 39, 226, 201}
+
+	cursorShapeNames = []string{"Block", "Underline", "Bar"}
+	cursorShapeCodes = []uint8{
+		protocol.CursorShapeBlock,
+		protocol.CursorShapeUnderline,
+		protocol.CursorShapeBar,
+	}
 
 	paneTimeoutNames     = []string{"2s", "1s", "5s"}
 	paneTimeoutDurations = []time.Duration{displayPanesTimeout, time.Second, 5 * time.Second}
@@ -62,6 +71,8 @@ var settingsSections = []settingsSection{
 		Options: []settingDef{
 			{ID: settingStatusClock, Label: "Status bar clock", Values: onOffValues, Default: 0},
 			{ID: settingBorderColor, Label: "Active pane border", Values: borderColorNames, Default: 0},
+			{ID: settingCursorShape, Label: "Cursor shape", Values: cursorShapeNames, Default: 0},
+			{ID: settingCursorBlink, Label: "Cursor blink", Values: onOffValues, Default: 1},
 		},
 	},
 	{
@@ -88,7 +99,8 @@ var settingsSections = []settingsSection{
 
 // settingsState holds session-wide option values. The view (open, cursor,
 // scroll position) lives on each client, but changing a value affects every
-// attached client. Values are kept in memory for the server's lifetime.
+// attached client. Values are kept in memory while the server runs and are
+// mirrored to the persisted TOML config file.
 type settingsState struct {
 	values map[settingID]int
 }
@@ -210,6 +222,27 @@ func (st *settingsState) borderColor() int32 {
 		return int32(colBorderActive)
 	}
 	return borderColorCodes[idx]
+}
+
+func (st *settingsState) cursorShape() uint8 {
+	def, ok := settingByID(settingCursorShape)
+	if !ok {
+		return protocol.CursorShapeBlock
+	}
+	idx := st.index(def)
+	if idx < 0 || idx >= len(cursorShapeCodes) {
+		return protocol.CursorShapeBlock
+	}
+	return cursorShapeCodes[idx]
+}
+
+func (st *settingsState) cursorBlink() bool {
+	def, ok := settingByID(settingCursorBlink)
+	if !ok {
+		return false
+	}
+	// Values are On, Off; only the first index blinks.
+	return st.index(def) == 0
 }
 
 func (st *settingsState) paneNumberTimeoutDuration() time.Duration {
@@ -387,7 +420,8 @@ func (s *Server) closeSettings(c *clientConn) {
 
 // handleSettingsInput consumes keys while the settings page is open.
 // Navigation follows the help menu; left/right, Enter, Space and Tab change
-// the selected option. Unknown keys are swallowed, not sent to a pane.
+// the selected option. r/Ctrl-r reloads the config file. Unknown keys are
+// swallowed, not sent to a pane.
 func (s *Server) handleSettingsInput(c *clientConn, data []byte) {
 	seq := string(data)
 	view := buildSettingsView(s.cols, s.rows, c.settingsCursor, c.settingsTop)
@@ -408,6 +442,8 @@ func (s *Server) handleSettingsInput(c *clientConn, data []byte) {
 		s.settingsAdjust(c, 1)
 	case isHelpNav(seq, "D", "h"), seq == "\x1b[Z":
 		s.settingsAdjust(c, -1)
+	case seq == "r", seq == "R", seq == "\x12":
+		s.reloadConfig(c)
 	case seq == "\x1b", seq == "\x03", seq == "q", seq == "Q", seq == "s", seq == "S", seq == "\x01s":
 		s.closeSettings(c)
 	default:
@@ -432,6 +468,7 @@ func (s *Server) settingsAdjust(c *clientConn, delta int) {
 		return
 	}
 	s.sess.opts().adjust(def, delta)
+	s.persistSettings(c)
 	s.settingsSyncView(c)
 	// Chrome-wide settings (clock, colors, tab width) need a full repaint.
 	s.needFull = true
@@ -443,9 +480,9 @@ func settingsFooter(view settingsView) string {
 	if view.scrollable {
 		first := view.top + 1
 		last := min(view.lineCount, view.top+view.contentRows)
-		return fmt.Sprintf(" ↑/↓ ←/→ %d-%d/%d q/Esc close ", first, last, view.lineCount)
+		return fmt.Sprintf(" ↑/↓ ←/→ r reload %d-%d/%d q close ", first, last, view.lineCount)
 	}
-	return " ↑/↓ ←/→/Enter q/Esc close "
+	return " ↑/↓ ←/→/Enter r reload q/Esc close "
 }
 
 // drawSettings renders an opaque, categorized, scrollable settings page.
