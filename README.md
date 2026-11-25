@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/qmm.png" alt="qmm logo" width="720" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/qmm-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/qmm-light.png" />
+    <img src="assets/qmm-light.png" alt="qmm logo" width="720" />
+  </picture>
 </p>
 
 <p align="center">
