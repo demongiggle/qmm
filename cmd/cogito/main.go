@@ -75,9 +75,11 @@ Inside cogito, press Ctrl-a to send a command prefix, followed by:
   Ctrl-← →  resize pane in direction  (also: Ctrl-↑ Ctrl-↓)
   d         detach (session keeps running)
   Ctrl-a    send a literal Ctrl-a to the application
+  ?         show categorized key help (Esc/q closes)
 
 Mouse: click a pane to focus it, click a window name in the status bar to
-switch windows, drag a pane border to resize.
+switch windows, drag a pane border to resize. Help is scrollable on short
+terminals with ↑/↓ or PgUp/PgDn.
 
 Config: none. Set COGITO_SOCKET_DIR to customize the socket location.
 `, version)

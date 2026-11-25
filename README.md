@@ -19,6 +19,7 @@ detach/attach — nothing else yet.
   switch, drag a divider to resize
 - **Zoom** a pane to fill the window (with a 1-cell margin so you can tell
   it's zoomed)
+- **Interactive help** (`prefix` `?`): categorized, color-coded key cheatsheet
 - Windows are auto-named after the foreground process
 - Multiple clients may attach to the same session; the effective size is the
   smallest attached terminal (tmux-style)
@@ -77,6 +78,12 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `d`      | Detach (session keeps running)      |
 | `prefix` `Ctrl-←/→/↑/↓` | Resize pane                    |
 | `prefix` `Ctrl-a` | Send a literal `Ctrl-a` to the app  |
+| `prefix` `?`      | Show categorized key help           |
+
+Press `prefix` `?` for a color-coded cheatsheet of pane, window, layout,
+session, and mouse commands. On short terminals, use `↑` / `↓`, `PgUp` / `PgDn`,
+or `j` / `k` to scroll; press `Esc`, `q`, or almost any other key to close it.
+The menu is local to the attached client.
 
 Mouse: click a pane to focus it; click a window name in the status bar to
 switch; drag a border between panes to resize it. The mouse wheel scrolls
@@ -135,6 +142,7 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] drag a border: the pane resizes live and stays after detach/reattach
 - [ ] `Ctrl-a c` opens a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates
 - [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
+- [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
 - [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes the pane
 - [ ] kill the pane (`Ctrl-a x`): window closes; killing the last pane quits everything
 - [ ] `cogito kill-server` from another terminal shuts the session down

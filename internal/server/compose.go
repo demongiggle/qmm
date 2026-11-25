@@ -30,6 +30,16 @@ const (
 	colBarActiveFG  = 16
 	colBarActiveBG  = 46
 	colTooSmall     = 203
+
+	colHelpBackdrop = 233
+	colHelpPanelBG  = 235
+	colHelpBorder   = 39
+	colHelpTitle    = 46
+	colHelpHeader   = 81
+	colHelpKeyFG    = 228
+	colHelpKeyBG    = 238
+	colHelpFG       = 252
+	colHelpMuted    = 244
 )
 
 // compositor turns session state into protocol frames and diffs successive
@@ -38,6 +48,9 @@ type compositor struct {
 	lastCols, lastRows int
 	last               []protocol.Cell
 	haveLast           bool
+
+	helpOpen bool
+	helpTop  int
 }
 
 func blankCell(row, col int) protocol.Cell {
@@ -59,6 +72,12 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	}
 
 	frame := protocol.Frame{Cols: cols, Rows: rows}
+	render := func() protocol.Frame {
+		if c.helpOpen {
+			c.drawHelp(&frame, setCell, cols, rows)
+		}
+		return c.diff(cells, forceFull, frame)
+	}
 
 	if cols < minCols || rows < minRows {
 		msg := fmt.Sprintf("terminal too small — need at least %dx%d", minCols, minRows)
@@ -70,7 +89,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			setCell(start+i, rows/2, r, colTooSmall, colDefault, protocol.StyleBold)
 		}
 		frame.CursorVisible = false
-		return c.diff(cells, forceFull, frame)
+		return render()
 	}
 
 	area := layout.Rect{X: 0, Y: 0, W: cols, H: rows - statusRows}
@@ -209,7 +228,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		setCell(cols-len(clock)+i, sbY, r, colBarFG, colBarBG, 0)
 	}
 
-	return c.diff(cells, forceFull, frame)
+	return render()
 }
 
 func boxChar(x, x0, x1 int, left, mid, right rune) rune {

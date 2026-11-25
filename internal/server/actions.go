@@ -16,9 +16,24 @@ const prefixByte = 0x01
 // server should shut down (cogito kill-server).
 func (s *Server) handleClientMessage(in clientMsg) bool {
 	c := in.cli
+	// While help is open, mouse/action messages dismiss the overlay instead
+	// of reaching the panes underneath. Input and control messages are
+	// handled below.
+	if c.helpOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			s.closeHelp(c)
+			return false
+		}
+	}
 	switch msg := in.msg.(type) {
 	case protocol.Input:
-		s.handleInput(c, msg.Data)
+		if c.helpOpen {
+			s.handleHelpInput(c, msg.Data)
+		} else {
+			s.handleInput(c, msg.Data)
+		}
 	case protocol.Resize:
 		cols, rows := msg.Cols, msg.Rows
 		if cols < 1 {
@@ -300,6 +315,7 @@ var prefixBindings = []prefixBinding{
 	{"o", func(s *Server, c *clientConn) { s.cyclePane() }},
 	{"z", func(s *Server, c *clientConn) { s.toggleZoom() }},
 	{"d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }},
+	{"?", func(s *Server, c *clientConn) { s.toggleHelp(c) }},
 	{"\x01", func(s *Server, c *clientConn) { s.writeRaw(c, []byte{0x01}) }},
 	// Ctrl+Arrow (xterm encoding 1;5, rxvt-style 5).
 	{"\x1b[1;5A", func(s *Server, c *clientConn) { s.resizePane(protocol.DirUp, 2) }},

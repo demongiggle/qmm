@@ -91,6 +91,12 @@ type clientConn struct {
 	dragID     int
 	dragActive bool
 
+	// Per-client compositor and help-menu state. Help is local to one client.
+	comp      compositor
+	helpOpen  bool
+	helpTop   int
+	forceFull bool
+
 	// Prefix-key state machine.
 	prefixArmed bool
 	prefixAt    time.Time
@@ -264,8 +270,9 @@ func (s *Server) readLoop(c *clientConn) {
 	}
 }
 
-// sendLoop coalesces frames (latest wins) and delivers control messages in
-// order. It exits when the connection breaks and reports to deadConns.
+// sendLoop sends queued control messages in order and the pending frame,
+// which enqueueFrame keeps up to date by merging incremental updates. It
+// exits when the connection breaks and reports to deadConns.
 func (c *clientConn) sendLoop(s *Server) {
 	for {
 		c.sendMu.Lock()
@@ -304,8 +311,15 @@ func (c *clientConn) enqueue(msg interface{}) {
 	}
 }
 
+// enqueueFrame stores the newest frame for sendLoop. Incremental frames are
+// merged with any still-pending frame: the compositor has already advanced
+// its diff baseline, so dropping an older frame would lose cells that later
+// diffs do not repeat.
 func (c *clientConn) enqueueFrame(f protocol.Frame) {
 	c.sendMu.Lock()
+	if pending := c.frame; pending != nil {
+		f = mergeFrames(*pending, f)
+	}
 	fc := f // copy header; Cells slice is not mutated after handoff
 	c.frame = &fc
 	c.sendMu.Unlock()
@@ -313,6 +327,32 @@ func (c *clientConn) enqueueFrame(f protocol.Frame) {
 	case c.notify <- struct{}{}:
 	default:
 	}
+}
+
+// mergeFrames overlays the newer frame's cells and metadata on an older,
+// not-yet-sent frame. A full newer frame supersedes everything before it.
+func mergeFrames(old, next protocol.Frame) protocol.Frame {
+	if next.Full || old.Cols != next.Cols || old.Rows != next.Rows {
+		return next
+	}
+	merged := next
+	merged.Full = old.Full || next.Full
+	merged.Cells = make([]protocol.Cell, len(old.Cells), len(old.Cells)+len(next.Cells))
+	index := make(map[[2]int]int, len(old.Cells))
+	for i, cell := range old.Cells {
+		merged.Cells[i] = cell
+		index[[2]int{cell.Row, cell.Col}] = i
+	}
+	for _, cell := range next.Cells {
+		key := [2]int{cell.Row, cell.Col}
+		if i, ok := index[key]; ok {
+			merged.Cells[i] = cell
+			continue
+		}
+		index[key] = len(merged.Cells)
+		merged.Cells = append(merged.Cells, cell)
+	}
+	return merged
 }
 
 func (s *Server) removeClient(c *clientConn) { s.dropClient(c) }
@@ -356,9 +396,14 @@ func (s *Server) scheduleRender() {
 }
 
 func (s *Server) broadcast() {
-	frame := s.comp.compose(s.sess, s.cols, s.rows, s.needFull)
+	forceFull := s.needFull
 	s.needFull = false
 	for c := range s.clients {
+		c.comp.helpOpen = c.helpOpen
+		c.comp.helpTop = c.helpTop
+		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
+		c.forceFull = false
+		c.helpTop = c.comp.helpTop
 		c.enqueueFrame(frame)
 	}
 }

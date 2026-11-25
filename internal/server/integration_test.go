@@ -664,6 +664,61 @@ func TestToggleZoomViaPrefix(t *testing.T) {
 	}
 }
 
+// TestHelpMenuViaPrefix exercises Ctrl-a ?: the categorized cheatsheet
+// appears, q closes it, and normal pane input resumes afterwards.
+func TestHelpMenuViaPrefix(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+	_ = c.recvFrame()
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01?")}); err != nil {
+		t.Fatalf("prefix ?: %v", err)
+	}
+	help := c.waitForFrame(func(f protocol.Frame) bool {
+		return strings.Contains(frameText(f), "COGITO HELP")
+	})
+	for _, want := range []string{"PANES", "WINDOWS", "LAYOUT", "SESSION", "MOUSE"} {
+		if !strings.Contains(frameText(help), want) {
+			t.Fatalf("help frame missing category %q:\n%s", want, frameText(help))
+		}
+	}
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("q")}); err != nil {
+		t.Fatalf("dismiss help: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return f.Full && !strings.Contains(frameText(f), "COGITO HELP")
+	})
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo $((400+37))\n")}); err != nil {
+		t.Fatalf("input after help: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return strings.Contains(frameText(f), "437")
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
 func hasCell(f protocol.Frame, col, row int, ch rune) bool {
 	for _, c := range f.Cells {
 		if c.Col == col && c.Row == row {
