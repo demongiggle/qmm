@@ -168,5 +168,3 @@ func (a *attach) handlePress(x, y int) bool {
 	_ = a.codec.Send(protocol.ActionFocus{X: x, Y: y})
 	return false
 }
-
-

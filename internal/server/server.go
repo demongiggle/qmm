@@ -131,7 +131,7 @@ func Run(cfg Config) error {
 	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = lock.Close()
-		return fmt.Errorf("cogito: another server is already running (lock %s)", s.sock+".lock")
+		return fmt.Errorf("another server is already running (lock %s)", s.sock+".lock")
 	}
 	defer func() { _ = lock.Close() }()
 
@@ -139,7 +139,7 @@ func Run(cfg Config) error {
 	// when nothing answers a dial.
 	if conn, err := net.DialTimeout("unix", s.sock, 300*time.Millisecond); err == nil {
 		_ = conn.Close()
-		return fmt.Errorf("cogito: server already running at %s", s.sock)
+		return fmt.Errorf("server already running at %s", s.sock)
 	}
 	if err := os.Remove(s.sock); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale socket: %w", err)
@@ -376,7 +376,9 @@ func (s *Server) refreshWindowNames() {
 	}
 }
 
-// teardown notifies clients, kills panes and closes the listener.
+// teardown notifies clients, kills panes and closes the listener. The short
+// sleep gives client event loops a chance to flush the Goodbye message
+// before their connections are closed.
 func (s *Server) teardown(reason string) {
 	for c := range s.clients {
 		c.enqueue(protocol.Goodbye{Reason: reason})
