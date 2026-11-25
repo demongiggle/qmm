@@ -554,3 +554,118 @@ func TestDetachKeepsSession(t *testing.T) {
 		t.Fatal("server did not shut down")
 	}
 }
+
+// TestPaneDeathCascadesSessionEnd runs "exit" in the only pane and expects the
+// server to notice, tear down the session, and shut down.
+func TestPaneDeathCascadesSessionEnd(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+	_ = c.recvFrame()
+
+	// Tell the shell to exit; the pane's death must cascade:
+	// pane -> window -> session -> server exit.
+	if err := c.codec.Send(protocol.Input{Data: []byte("exit\n")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	gotGoodbye := false
+	for time.Now().Before(deadline) {
+		_ = c.conn.SetReadDeadline(time.Now().Add(time.Second))
+		m, err := c.codec.Recv()
+		if err != nil {
+			break
+		}
+		if _, ok := m.(protocol.Goodbye); ok {
+			gotGoodbye = true
+			break
+		}
+	}
+	if !gotGoodbye {
+		t.Fatal("expected Goodbye when the last pane exits")
+	}
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not exit after the last pane died")
+	}
+
+	if _, err := os.Stat(sock); !os.IsNotExist(err) {
+		t.Fatal("socket not removed after shutdown")
+	}
+}
+
+// TestToggleZoomViaPrefix exercises Ctrl-a z end to end: the active pane
+// takes over the screen with the zoom flag set, and toggling back restores
+// the split.
+func TestToggleZoomViaPrefix(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	_ = c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 2 })
+
+	// Ctrl-a z to zoom.
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01z")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	_ = c.waitForFrame(func(f protocol.Frame) bool {
+		if len(f.Panes) != 1 || !f.Tabs[0].Zoomed {
+			return false
+		}
+		// The box border corners must be drawn.
+		return hasCell(f, 0, 0, '┌') && hasCell(f, f.Cols-1, 0, '┐')
+	})
+
+	// Ctrl-a z again to unzoom.
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01z")}); err != nil {
+		t.Fatalf("input: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Panes) == 2 && !f.Tabs[0].Zoomed
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
+func hasCell(f protocol.Frame, col, row int, ch rune) bool {
+	for _, c := range f.Cells {
+		if c.Col == col && c.Row == row {
+			return c.Ch == ch
+		}
+	}
+	// In a full frame every cell is present; a miss means it does not match.
+	return false
+}
