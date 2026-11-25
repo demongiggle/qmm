@@ -48,7 +48,8 @@ func Attach(socketPath string) error {
 		return fmt.Errorf("cogito: init screen: %w", err)
 	}
 	screen.EnableMouse()
-	screen.EnablePaste()
+	// Note: no EnablePaste. Pasted bytes arrive as ordinary key input and are
+	// forwarded to the pane, matching how tcell delivers them unencoded.
 	screen.Clear()
 	screen.Show()
 
@@ -67,7 +68,8 @@ func Attach(socketPath string) error {
 	if err != nil {
 		return fmt.Errorf("cogito: handshake: %w", err)
 	}
-	if _, ok := msg.(protocol.Welcome); !ok {
+	welcome, ok := msg.(protocol.Welcome)
+	if !ok {
 		return fmt.Errorf("cogito: unexpected handshake reply from server")
 	}
 
@@ -96,10 +98,12 @@ func Attach(socketPath string) error {
 	}()
 
 	c := &attach{
-		screen: screen,
-		codec:  codec,
-		cols:   cols,
-		rows:   rows,
+		screen:    screen,
+		codec:     codec,
+		cols:      cols,
+		rows:      rows,
+		frameCols: welcome.Cols,
+		frameRows: welcome.Rows,
 	}
 
 	reason := ""

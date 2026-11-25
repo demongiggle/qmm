@@ -11,7 +11,9 @@ type attach struct {
 	screen tcell.Screen
 	codec  *protocol.Codec
 
-	cols, rows int
+	cols, rows int // terminal size reported to the server
+	frameCols  int // size of the last frame the server sent us
+	frameRows  int
 
 	frame protocol.Frame // last frame, for mouse hit-testing
 
@@ -50,6 +52,9 @@ func styleOf(c protocol.Cell) tcell.Style {
 }
 
 func (a *attach) applyFrame(f protocol.Frame) {
+	if f.Cols > 0 && f.Rows > 0 {
+		a.frameCols, a.frameRows = f.Cols, f.Rows
+	}
 	if f.Full {
 		a.screen.Clear()
 	}
@@ -71,11 +76,28 @@ func (a *attach) applyFrame(f protocol.Frame) {
 	a.frame = f
 }
 
-// statusRow is the row index of the status bar.
-func (a *attach) statusRow() int { return a.rows - 1 }
+// statusRow is the row index of the status bar, in frame coordinates.
+func (a *attach) statusRow() int {
+	if a.frameRows > 0 {
+		return a.frameRows - 1
+	}
+	return a.rows - 1
+}
 
 func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	x, y := ev.Position()
+	// Ignore input outside the server-rendered area (e.g. when this
+	// terminal is bigger than the effective session size).
+	if a.frameCols > 0 && a.frameRows > 0 && (x >= a.frameCols || y >= a.frameRows) {
+		if ev.Buttons()&tcell.ButtonPrimary == 0 {
+			a.mouseDown = false
+			if a.dragging {
+				_ = a.codec.Send(protocol.ActionDragEnd{Splitter: a.dragID})
+				a.dragging = false
+			}
+		}
+		return
+	}
 	pressed := ev.Buttons()&tcell.ButtonPrimary != 0
 
 	switch {
@@ -119,45 +141,32 @@ func (a *attach) handlePress(x, y int) bool {
 		}
 		return false
 	}
-	// Border drag: grab a splitter (1-cell tolerance).
+	// Border drag: grab the splitter cell itself (clicking the adjacent pane
+	// must focus it instead of starting a drag).
 	for _, sp := range a.frame.Splitters {
-		var dist int
+		var onBorder bool
 		if sp.Vertical {
-			dist = abs(x - sp.X)
+			onBorder = x == sp.X && y >= sp.Y && y < sp.Y+sp.Len
 		} else {
-			dist = abs(y - sp.Y)
+			onBorder = y == sp.Y && x >= sp.X && x < sp.X+sp.Len
 		}
-		if dist <= 1 {
-			// Within the splitter's span?
-			inSpan := false
-			if sp.Vertical {
-				inSpan = y >= sp.Y-1 && y <= sp.Y+sp.Len
-			} else {
-				inSpan = x >= sp.X-1 && x <= sp.X+sp.Len
-			}
-			if !inSpan {
-				continue
-			}
-			a.dragging = true
-			a.dragID = sp.ID
-			a.dragVertical = sp.Vertical
-			if sp.Vertical {
-				a.lastDragAxis = x
-			} else {
-				a.lastDragAxis = y
-			}
-			_ = a.codec.Send(protocol.ActionDragStart{Splitter: sp.ID})
-			return true
+		if !onBorder {
+			continue
 		}
+		a.dragging = true
+		a.dragID = sp.ID
+		a.dragVertical = sp.Vertical
+		if sp.Vertical {
+			a.lastDragAxis = x
+		} else {
+			a.lastDragAxis = y
+		}
+		_ = a.codec.Send(protocol.ActionDragStart{Splitter: sp.ID})
+		return true
 	}
 	// Otherwise: focus the pane under the cursor.
 	_ = a.codec.Send(protocol.ActionFocus{X: x, Y: y})
 	return false
 }
 
-func abs(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
+

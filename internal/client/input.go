@@ -1,124 +1,137 @@
 package client
 
 import (
+	"strconv"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 )
 
 // encodeKey converts a tcell key event into the byte sequence to send to the
-// pane (xterm-style).
+// pane (xterm-style). Ctrl and Alt map onto the CSI modifier parameter where
+// the sequence family supports it (xterm modifier: 2=shift, 3=alt, 4=shift+alt,
+// 5=ctrl, 6=ctrl+shift, 7=alt+ctrl); otherwise Alt prefixes ESC.
 func encodeKey(ev *tcell.EventKey) []byte {
 	mods := ev.Modifiers()
-	alt := mods&tcell.ModAlt != 0
 	ctrl := mods&tcell.ModCtrl != 0
+	alt := mods&tcell.ModAlt != 0
 	key := ev.Key()
-
-	emit := func(b []byte) []byte {
-		if alt {
-			return append([]byte{0x1b}, b...)
-		}
-		return b
-	}
 
 	switch key {
 	case tcell.KeyEnter:
-		return emit([]byte{'\r'})
+		return withAlt([]byte{'\r'}, alt)
 	case tcell.KeyTab:
-		return emit([]byte{'\t'})
+		return withAlt([]byte{'\t'}, alt)
 	case tcell.KeyEscape:
-		return []byte{0x1b}
+		return []byte{0x1b} // never double-wrapped
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		if ctrl {
-			return []byte{0x08}
+			return withAlt([]byte{0x08}, alt)
 		}
-		return []byte{0x7f}
+		return withAlt([]byte{0x7f}, alt)
 	case tcell.KeyUp:
-		return emit(arrowSeq('A', ctrl))
+		return csiFinal('A', ctrl, alt)
 	case tcell.KeyDown:
-		return emit(arrowSeq('B', ctrl))
+		return csiFinal('B', ctrl, alt)
 	case tcell.KeyRight:
-		return emit(arrowSeq('C', ctrl))
+		return csiFinal('C', ctrl, alt)
 	case tcell.KeyLeft:
-		return emit(arrowSeq('D', ctrl))
+		return csiFinal('D', ctrl, alt)
 	case tcell.KeyHome:
-		if ctrl {
-			return []byte("\x1b[1;5H")
-		}
-		return []byte("\x1b[H")
+		return csiFinal('H', ctrl, alt)
 	case tcell.KeyEnd:
-		if ctrl {
-			return []byte("\x1b[1;5F")
-		}
-		return []byte("\x1b[F")
+		return csiFinal('F', ctrl, alt)
 	case tcell.KeyPgUp:
-		return []byte("\x1b[5~")
+		return csiTilde(5, ctrl, alt)
 	case tcell.KeyPgDn:
-		return []byte("\x1b[6~")
+		return csiTilde(6, ctrl, alt)
 	case tcell.KeyInsert:
-		return []byte("\x1b[2~")
+		return csiTilde(2, ctrl, alt)
 	case tcell.KeyDelete:
-		return []byte("\x1b[3~")
+		return csiTilde(3, ctrl, alt)
 	case tcell.KeyF1:
-		return []byte("\x1bOP")
+		return ss3('P', ctrl, alt)
 	case tcell.KeyF2:
-		return []byte("\x1bOQ")
+		return ss3('Q', ctrl, alt)
 	case tcell.KeyF3:
-		return []byte("\x1bOR")
+		return ss3('R', ctrl, alt)
 	case tcell.KeyF4:
-		return []byte("\x1bOS")
+		return ss3('S', ctrl, alt)
 	case tcell.KeyF5:
-		return []byte("\x1b[15~")
+		return csiTilde(15, ctrl, alt)
 	case tcell.KeyF6:
-		return []byte("\x1b[17~")
+		return csiTilde(17, ctrl, alt)
 	case tcell.KeyF7:
-		return []byte("\x1b[18~")
+		return csiTilde(18, ctrl, alt)
 	case tcell.KeyF8:
-		return []byte("\x1b[19~")
+		return csiTilde(19, ctrl, alt)
 	case tcell.KeyF9:
-		return []byte("\x1b[20~")
+		return csiTilde(20, ctrl, alt)
 	case tcell.KeyF10:
-		return []byte("\x1b[21~")
+		return csiTilde(21, ctrl, alt)
 	case tcell.KeyF11:
-		return []byte("\x1b[23~")
+		return csiTilde(23, ctrl, alt)
 	case tcell.KeyF12:
-		return []byte("\x1b[24~")
+		return csiTilde(24, ctrl, alt)
 	}
-
-	// Ctrl+letter arrives either as a dedicated KeyCtrlX constant or as
-	// KeyRune with the control modifier, depending on the terminal.
-	if key >= tcell.KeyCtrlA && key <= tcell.KeyCtrlZ {
-		return []byte{byte(key-tcell.KeyCtrlA) + 1}
-	}
-	if key == tcell.KeyRune {
+	switch {
+	case key >= tcell.KeyCtrlA && key <= tcell.KeyCtrlZ:
+		return withAlt([]byte{byte(key-tcell.KeyCtrlA) + 1}, alt)
+	case key == tcell.KeyRune:
 		r := ev.Rune()
-		if ctrl && r >= 'a' && r <= 'z' {
-			b := []byte{byte(r) - 'a' + 1}
-			if alt {
-				return append([]byte{0x1b}, b...)
-			}
-			return b
-		}
-		if ctrl && r >= 'A' && r <= 'Z' {
-			b := []byte{byte(r) - 'A' + 1}
-			if alt {
-				return append([]byte{0x1b}, b...)
-			}
-			return b
+		if ctrl && ((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return withAlt([]byte{byte(unicode.ToLower(r)) - 'a' + 1}, alt)
 		}
 		b := make([]byte, utf8.RuneLen(r))
 		utf8.EncodeRune(b, r)
-		if alt {
-			return append([]byte{0x1b}, b...)
-		}
-		return b
+		return withAlt(b, alt)
 	}
 	return nil
 }
 
-func arrowSeq(final byte, ctrl bool) []byte {
-	if ctrl {
-		return []byte{0x1b, '[', '1', ';', '5', final}
+// modParam returns the xterm modifier parameter: 1=none, 2=shift, 3=alt,
+// 4=shift+alt, 5=ctrl, 6=ctrl+shift, 7=alt+ctrl.
+func modParam(ctrl, alt bool) int {
+	m := 1
+	if alt {
+		m += 2
 	}
-	return []byte{0x1b, '[', final}
+	if ctrl {
+		m += 4
+	}
+	return m
+}
+
+func csiFinal(final byte, ctrl, alt bool) []byte {
+	m := modParam(ctrl, alt)
+	if m == 1 {
+		return []byte{0x1b, '[', final}
+	}
+	return []byte("\x1b[1;" + strconv.Itoa(m) + string(final))
+}
+
+func csiTilde(n int, ctrl, alt bool) []byte {
+	m := modParam(ctrl, alt)
+	if m == 1 {
+		return []byte("\x1b[" + strconv.Itoa(n) + "~")
+	}
+	return []byte("\x1b[" + strconv.Itoa(n) + ";" + strconv.Itoa(m) + "~")
+}
+
+func ss3(letter byte, ctrl, alt bool) []byte {
+	m := modParam(ctrl, alt)
+	if m == 1 {
+		return []byte{0x1b, 'O', letter}
+	}
+	return []byte("\x1b[1;" + strconv.Itoa(m) + string(letter))
+}
+
+func withAlt(seq []byte, alt bool) []byte {
+	if !alt {
+		return seq
+	}
+	out := make([]byte, 0, len(seq)+1)
+	out = append(out, 0x1b)
+	return append(out, seq...)
 }
