@@ -1,10 +1,24 @@
 package client
 
 import (
+	"time"
+
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/demongiggle/cogito/internal/protocol"
 )
+
+const (
+	doubleClickInterval = 500 * time.Millisecond
+	doubleClickSlop     = 2
+)
+
+// paneClick records a completed or pending click on a pane hit target.
+type paneClick struct {
+	x, y   int
+	paneID int
+	at     time.Time
+}
 
 // attach holds the interactive state of an attached client.
 type attach struct {
@@ -22,6 +36,9 @@ type attach struct {
 	dragVertical bool
 	lastDragAxis int
 	mouseDown    bool
+
+	pendingClick paneClick
+	lastClick    paneClick
 }
 
 // colorOf converts a protocol color to a tcell color. Palette indexes must
@@ -99,6 +116,7 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	// terminal is bigger than the effective session size). A press there
 	// can never start a gesture; a release ends one.
 	if a.frameCols > 0 && a.frameRows > 0 && (x >= a.frameCols || y >= a.frameRows) {
+		a.clearClicks()
 		primary := ev.Buttons()&tcell.ButtonPrimary != 0
 		switch {
 		case !primary:
@@ -119,9 +137,19 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	case pressed && !a.mouseDown:
 		// Button press.
 		a.mouseDown = true
-		if a.handlePress(x, y) {
+		pane, onPane := a.paneAt(x, y)
+		if onPane && a.isDoubleClick(x, y, pane.ID) {
+			a.clearClicks()
+			debugLog("double click pane=%d at %d,%d", pane.ID, x, y)
+			_ = a.codec.Send(protocol.ActionTogglePaneZoom{PaneID: pane.ID})
 			return
 		}
+		startedDrag := a.handlePress(x, y)
+		if startedDrag || !onPane {
+			a.clearClicks()
+			return
+		}
+		a.pendingClick = paneClick{x: x, y: y, paneID: pane.ID, at: time.Now()}
 	case pressed && a.mouseDown && a.dragging:
 		// Drag in progress.
 		axis := x
@@ -141,8 +169,53 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 		if a.dragging {
 			_ = a.codec.Send(protocol.ActionDragEnd{Splitter: a.dragID})
 			a.dragging = false
+			a.clearClicks()
+		} else if !a.pendingClick.at.IsZero() {
+			a.lastClick = a.pendingClick
+			a.lastClick.at = time.Now()
+			a.pendingClick = paneClick{}
 		}
 	}
+}
+
+func (a *attach) clearClicks() {
+	a.pendingClick = paneClick{}
+	a.lastClick = paneClick{}
+}
+
+func (a *attach) isDoubleClick(x, y, paneID int) bool {
+	c := a.lastClick
+	if c.at.IsZero() || c.paneID != paneID || time.Since(c.at) > doubleClickInterval {
+		return false
+	}
+	dx, dy := x-c.x, y-c.y
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	return dx <= doubleClickSlop && dy <= doubleClickSlop
+}
+
+// paneAt returns the topmost pane hit target at (x, y). A zoomed pane's
+// floating overlay takes priority over the split panes underneath it.
+func (a *attach) paneAt(x, y int) (protocol.PaneRect, bool) {
+	for _, p := range a.frame.Panes {
+		if p.Zoomed && paneRectContains(p, x, y) {
+			return p, true
+		}
+	}
+	for _, p := range a.frame.Panes {
+		if paneRectContains(p, x, y) {
+			return p, true
+		}
+	}
+	return protocol.PaneRect{}, false
+}
+
+func paneRectContains(p protocol.PaneRect, x, y int) bool {
+	return x >= p.X && x < p.X+p.W && y >= p.Y && y < p.Y+p.H
 }
 
 // handlePress handles a fresh mouse press; reports whether it started a drag.

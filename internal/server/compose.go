@@ -111,31 +111,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	var activeRect layout.Rect
 	var haveActive bool
 
-	if w != nil && w.zoomed {
-		p := s.panes[w.activePane]
-		// Zoom: pane fills the area inset by 1 cell, with a box border.
-		inner := layout.Rect{X: 1, Y: 1, W: cols - 2, H: area.H - 2}
-		activeRect, haveActive = inner, true
-		if p != nil {
-			blitPane(setCell, p, inner)
-			c := p.vtCursor()
-			frame.CursorX, frame.CursorY = inner.X+c.x, inner.Y+c.y
-			frame.CursorVisible = c.visible
-		}
-		// box border; corners drawn with the horizontal edges, so the
-		// verticals skip them.
-		x0, y0, x1, y1 := 0, 0, cols-1, area.H-1
-		for x := x0; x <= x1; x++ {
-			setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), colBorderActive, colDefault, 0)
-			setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), colBorderActive, colDefault, 0)
-		}
-		for y := y0 + 1; y < y1; y++ {
-			setCell(x0, y, '│', colBorderActive, colDefault, 0)
-			setCell(x1, y, '│', colBorderActive, colDefault, 0)
-		}
-		frame.Splitters = nil // zoom has no drag handles
-		frame.Panes = []protocol.PaneRect{{ID: w.activePane, X: inner.X, Y: inner.Y, W: inner.W, H: inner.H, Active: true}}
-	} else if w != nil {
+	if w != nil {
 		rects := w.tree.Compute(area)
 		borders := w.tree.Borders(area)
 
@@ -147,11 +123,16 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			blitPane(setCell, p, r)
 			if id == w.activePane {
 				activeRect, haveActive = r, true
-				c := p.vtCursor()
-				frame.CursorX, frame.CursorY = r.X+c.x, r.Y+c.y
-				frame.CursorVisible = c.visible
 			}
-			frame.Panes = append(frame.Panes, protocol.PaneRect{ID: id, X: r.X, Y: r.Y, W: r.W, H: r.H, Active: id == w.activePane})
+			if id == w.activePane && !w.zoomed {
+				cur := p.vtCursor()
+				frame.CursorX, frame.CursorY = r.X+cur.x, r.Y+cur.y
+				frame.CursorVisible = cur.visible
+			}
+			frame.Panes = append(frame.Panes, protocol.PaneRect{
+				ID: id, X: r.X, Y: r.Y, W: r.W, H: r.H,
+				Active: id == w.activePane && !w.zoomed,
+			})
 		}
 
 		// Draw borders; intersections become '+'. Track cell ownership.
@@ -190,8 +171,47 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			}
 			setCell(x, y, ch, color, colDefault, 0)
 		}
-		for _, b := range borders {
-			frame.Splitters = append(frame.Splitters, protocol.Splitter{ID: b.ID, X: b.X, Y: b.Y, Len: b.Len, Vertical: b.Vertical})
+		if !w.zoomed {
+			for _, b := range borders {
+				frame.Splitters = append(frame.Splitters, protocol.Splitter{ID: b.ID, X: b.X, Y: b.Y, Len: b.Len, Vertical: b.Vertical})
+			}
+		}
+
+		if w.zoomed {
+			// Zoom is a floating overlay: the split panes and their borders
+			// remain visible in a 2% margin around all four sides.
+			outer, inner := zoomRects(area.W, area.H)
+			for y := outer.Y; y < outer.Bottom(); y++ {
+				for x := outer.X; x < outer.Right(); x++ {
+					setCell(x, y, ' ', colDefault, colDefault, 0)
+				}
+			}
+			p := s.panes[w.activePane]
+			if p != nil {
+				blitPane(setCell, p, inner)
+				cur := p.vtCursor()
+				frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
+				frame.CursorVisible = cur.visible
+			} else {
+				frame.CursorVisible = false
+			}
+			// Box border; corners are drawn with the horizontal edges, so
+			// the verticals skip them.
+			x0, y0 := outer.X, outer.Y
+			x1, y1 := outer.Right()-1, outer.Bottom()-1
+			for x := x0; x <= x1; x++ {
+				setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), colBorderActive, colDefault, 0)
+				setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), colBorderActive, colDefault, 0)
+			}
+			for y := y0 + 1; y < y1; y++ {
+				setCell(x0, y, '│', colBorderActive, colDefault, 0)
+				setCell(x1, y, '│', colBorderActive, colDefault, 0)
+			}
+			frame.Panes = append(frame.Panes, protocol.PaneRect{
+				ID: w.activePane, X: outer.X, Y: outer.Y,
+				W: outer.W, H: outer.H, Active: true, Zoomed: true,
+			})
+			frame.Splitters = nil // the overlay covers the drag handles
 		}
 	}
 

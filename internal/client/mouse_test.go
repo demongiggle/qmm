@@ -153,6 +153,70 @@ func TestClickNextToSplitterFocusesInsteadOfDragging(t *testing.T) {
 	}
 }
 
+func TestDoubleClickPaneTogglesZoom(t *testing.T) {
+	f := newMouseFixture(t, 80, 24, testFrame(80, 24))
+	f.press(60, 10) // inside the right pane
+	f.release(60, 10)
+	if msg, ok := f.nextAction().(protocol.ActionFocus); !ok || msg.X != 60 || msg.Y != 10 {
+		t.Fatalf("first click = %#v, want ActionFocus{60,10}", msg)
+	}
+	f.press(60, 10)
+	if msg, ok := f.nextAction().(protocol.ActionTogglePaneZoom); !ok || msg.PaneID != 2 {
+		t.Fatalf("second click = %#v, want ActionTogglePaneZoom{2}", msg)
+	}
+	f.release(60, 10)
+}
+
+func TestDoubleClickUsesZoomedOverlayHitTarget(t *testing.T) {
+	frame := testFrame(80, 24)
+	frame.Panes = append(frame.Panes, protocol.PaneRect{
+		ID: 9, X: 10, Y: 5, W: 60, H: 14, Active: true, Zoomed: true,
+	})
+	f := newMouseFixture(t, 80, 24, frame)
+
+	// This point is also inside the left split pane; the floating overlay
+	// must win so a double-click toggles the pane actually shown on top.
+	f.press(20, 10)
+	f.release(20, 10)
+	_ = f.nextAction() // first click focuses
+	f.press(20, 10)
+	if msg, ok := f.nextAction().(protocol.ActionTogglePaneZoom); !ok || msg.PaneID != 9 {
+		t.Fatalf("overlay double-click = %#v, want ActionTogglePaneZoom{9}", msg)
+	}
+}
+
+func TestSlowSecondClickFocusesInsteadOfZooming(t *testing.T) {
+	f := newMouseFixture(t, 80, 24, testFrame(80, 24))
+	f.press(60, 10)
+	f.release(60, 10)
+	_ = f.nextAction()
+	f.attach.lastClick.at = time.Now().Add(-2 * doubleClickInterval)
+
+	f.press(60, 10)
+	if msg, ok := f.nextAction().(protocol.ActionFocus); !ok || msg.X != 60 || msg.Y != 10 {
+		t.Fatalf("slow second click = %#v, want ActionFocus{60,10}", msg)
+	}
+}
+
+func TestDragClearsDoubleClickHistory(t *testing.T) {
+	f := newMouseFixture(t, 80, 24, testFrame(80, 24))
+	f.press(60, 10)
+	f.release(60, 10)
+	_ = f.nextAction()
+
+	f.press(40, 5) // start a drag on the splitter
+	if msg, ok := f.nextAction().(protocol.ActionDragStart); !ok || msg.Splitter != 42 {
+		t.Fatalf("drag press = %#v, want ActionDragStart{42}", msg)
+	}
+	f.release(40, 5)
+	_ = f.nextAction() // ActionDragEnd
+
+	f.press(60, 10)
+	if msg, ok := f.nextAction().(protocol.ActionFocus); !ok || msg.X != 60 || msg.Y != 10 {
+		t.Fatalf("click after drag = %#v, want ActionFocus{60,10}", msg)
+	}
+}
+
 func TestPressOutsideFrameIsIgnored(t *testing.T) {
 	// Frame is smaller than the screen; clicks outside the frame are dropped.
 	frame := testFrame(40, 12)

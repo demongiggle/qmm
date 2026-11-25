@@ -72,7 +72,7 @@ Inside cogito, press Ctrl-a to send a command prefix, followed by:
   x         kill current pane
   &         shut down session (confirm with y, cancel with n/Esc)
   o         cycle to next pane
-  z         toggle zoom of current pane (fills the area, 1-cell margin)
+  z         toggle floating zoom (centered, at least 2%% margins)
   Ctrl-← →  resize pane in direction  (also: Ctrl-↑ Ctrl-↓)
   d         detach (session keeps running)
   Ctrl-a    send a literal Ctrl-a to the application
@@ -80,9 +80,9 @@ Inside cogito, press Ctrl-a to send a command prefix, followed by:
 
 New panes and windows take focus as soon as they are created.
 
-Mouse: click a pane to focus it, click a window name in the status bar to
-switch windows, drag a pane border to resize. Help is scrollable on short
-terminals with ↑/↓ or PgUp/PgDn.
+Mouse: click a pane to focus it, double-click it to toggle floating zoom,
+click a window name in the status bar to switch windows, drag a pane border
+to resize. Help is scrollable on short terminals with ↑/↓ or PgUp/PgDn.
 
 Config: none. Set COGITO_SOCKET_DIR to customize the socket location.
 `, version)

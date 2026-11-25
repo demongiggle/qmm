@@ -686,8 +686,8 @@ func TestPaneDeathCascadesSessionEnd(t *testing.T) {
 }
 
 // TestToggleZoomViaPrefix exercises Ctrl-a z end to end: the active pane
-// takes over the screen with the zoom flag set, and toggling back restores
-// the split.
+// becomes a centered floating overlay with the zoom flag set, and toggling
+// back restores the split.
 func TestToggleZoomViaPrefix(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh") // fast, deterministic shell for marker matching
 	dir := t.TempDir()
@@ -711,11 +711,17 @@ func TestToggleZoomViaPrefix(t *testing.T) {
 		t.Fatalf("input: %v", err)
 	}
 	_ = c.waitForFrame(func(f protocol.Frame) bool {
-		if len(f.Panes) != 1 || !f.Tabs[0].Zoomed {
+		if !f.Full || len(f.Tabs) == 0 || !f.Tabs[0].Zoomed {
 			return false
 		}
-		// The box border corners must be drawn.
-		return hasCell(f, 0, 0, '┌') && hasCell(f, f.Cols-1, 0, '┐')
+		overlay, ok := zoomOverlay(f)
+		if !ok || len(f.Panes) != 3 || len(f.Splitters) != 0 {
+			return false
+		}
+		// The floating box is inset from the outer edges, not flush with them.
+		return overlay.X > 0 && overlay.Y > 0 &&
+			hasCell(f, overlay.X, overlay.Y, '┌') &&
+			hasCell(f, overlay.X+overlay.W-1, overlay.Y, '┐')
 	})
 
 	// Ctrl-a z again to unzoom.
@@ -723,7 +729,71 @@ func TestToggleZoomViaPrefix(t *testing.T) {
 		t.Fatalf("input: %v", err)
 	}
 	c.waitForFrame(func(f protocol.Frame) bool {
-		return len(f.Panes) == 2 && !f.Tabs[0].Zoomed
+		_, zoomed := zoomOverlay(f)
+		return len(f.Panes) == 2 && !zoomed && len(f.Tabs) > 0 && !f.Tabs[0].Zoomed
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
+// TestTogglePaneZoomViaDoubleClickAction exercises the mouse double-click
+// action end to end: the clicked pane becomes the floating overlay, and a
+// second double-click on that pane restores the split.
+func TestTogglePaneZoomViaDoubleClickAction(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	split := c.waitForFrame(func(f protocol.Frame) bool { return f.Full && len(f.Panes) == 2 })
+	targetID := -1
+	for _, p := range split.Panes {
+		if !p.Active {
+			targetID = p.ID
+			break
+		}
+	}
+	if targetID < 0 {
+		t.Fatalf("no inactive pane in split frame: %+v", split.Panes)
+	}
+
+	if err := c.codec.Send(protocol.ActionTogglePaneZoom{PaneID: targetID}); err != nil {
+		t.Fatalf("double-click zoom: %v", err)
+	}
+	_ = c.waitForFrame(func(f protocol.Frame) bool {
+		overlay, ok := zoomOverlay(f)
+		return f.Full && ok && overlay.ID == targetID &&
+			len(f.Tabs) > 0 && f.Tabs[0].Zoomed &&
+			hasCell(f, overlay.X, overlay.Y, '┌')
+	})
+
+	if err := c.codec.Send(protocol.ActionTogglePaneZoom{PaneID: targetID}); err != nil {
+		t.Fatalf("double-click restore: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		_, zoomed := zoomOverlay(f)
+		return f.Full && !zoomed && len(f.Panes) == 2 &&
+			len(f.Tabs) > 0 && !f.Tabs[0].Zoomed
 	})
 
 	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
@@ -844,6 +914,15 @@ func TestPrefixSplitBindings(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("server did not shut down")
 	}
+}
+
+func zoomOverlay(f protocol.Frame) (protocol.PaneRect, bool) {
+	for _, p := range f.Panes {
+		if p.Zoomed {
+			return p, true
+		}
+	}
+	return protocol.PaneRect{}, false
 }
 
 func hasCell(f protocol.Frame, col, row int, ch rune) bool {

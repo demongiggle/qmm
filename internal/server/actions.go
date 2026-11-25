@@ -82,6 +82,8 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		s.cyclePane()
 	case protocol.ActionToggleZoom:
 		s.toggleZoom()
+	case protocol.ActionTogglePaneZoom:
+		s.togglePaneZoom(msg.PaneID)
 	case protocol.ActionResizePane:
 		s.resizePane(msg.Direction, msg.Delta)
 	case protocol.ActionDragStart:
@@ -216,7 +218,17 @@ func (s *Server) cyclePane() {
 	if w == nil {
 		return
 	}
-	w.activePane = w.tree.Next(w.activePane)
+	next := w.tree.Next(w.activePane)
+	if next == w.activePane {
+		s.broadcast()
+		return
+	}
+	w.activePane = next
+	// The new active pane must own the floating overlay's PTY size.
+	if w.zoomed {
+		s.relayout()
+		s.needFull = true
+	}
 	s.broadcast()
 }
 
@@ -226,6 +238,24 @@ func (s *Server) toggleZoom() {
 		return
 	}
 	w.zoomed = !w.zoomed
+	s.relayout()
+	s.needFull = true
+	s.broadcast()
+}
+
+// togglePaneZoom handles a mouse double-click. Double-clicking the floating
+// pane restores the split; double-clicking an exposed pane zooms that pane.
+func (s *Server) togglePaneZoom(paneID int) {
+	w := s.activeWindow()
+	if w == nil || !w.tree.Has(paneID) || s.sess.panes[paneID] == nil {
+		return
+	}
+	if w.zoomed && w.activePane == paneID {
+		w.zoomed = false
+	} else {
+		w.zoomed = true
+		w.activePane = paneID
+	}
 	s.relayout()
 	s.needFull = true
 	s.broadcast()

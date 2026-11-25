@@ -17,10 +17,11 @@ detach/attach — nothing else yet.
   new shell
 - **Detach / reattach**: the session lives in a background server; close the
   terminal and `cogito attach` brings everything back
-- **Mouse**: click to focus a pane, click a window in the status bar to
-  switch, drag a divider to resize
-- **Zoom** a pane to fill the window (with a 1-cell margin so you can tell
-  it's zoomed)
+- **Mouse**: click to focus a pane, double-click to zoom it, click a window in
+  the status bar to switch, drag a divider to resize
+- **Zoom** floats a pane above the split layout, centered with at least a 2%
+  margin on all four sides of the content area; `prefix` `z` or a
+  double-click toggles it
 - **Color**: pane output keeps ANSI 16/256-color and 24-bit RGB styling;
   active pane borders, window tabs, and the help overlay are color-coded
 - **Interactive help** (`prefix` `?`): categorized, color-coded key cheatsheet
@@ -81,7 +82,7 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `o`      | Cycle to next pane                  |
 | `prefix` `x`      | Kill current pane                   |
 | `prefix` `&`      | Shut down session (confirm)          |
-| `prefix` `z`      | Toggle zoom of current pane         |
+| `prefix` `z`      | Toggle floating pane zoom           |
 | `prefix` `d`      | Detach (session keeps running)      |
 | `prefix` `Ctrl-←/→/↑/↓` | Resize pane                    |
 | `prefix` `Ctrl-a` | Send a literal `Ctrl-a` to the app  |
@@ -101,9 +102,11 @@ session, and mouse commands. On short terminals, use `↑` / `↓`, `PgUp` / `Pg
 or `j` / `k` to scroll; press `Esc`, `q`, or almost any other key to close it.
 The menu is local to the attached client.
 
-Mouse: click a pane to focus it; click a window name in the status bar to
-switch; drag a border between panes to resize it. The mouse wheel scrolls
-nothing (scrollback is not implemented yet).
+Mouse: click a pane to focus it; double-click a pane to float it above the
+split as a centered zoom overlay, or double-click the floating pane to restore
+the layout; click a window name in the status bar to switch; drag a border
+between panes to resize it. The mouse wheel scrolls nothing (scrollback is
+not implemented yet).
 
 When the shell in the last pane of the last window exits, the session ends
 and attached clients exit with it; this shell-driven exit is not prompted.
@@ -155,7 +158,8 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] active pane border, active window tab, and `Ctrl-a ?` help are color-coded
 - [ ] `Ctrl-a |` splits left/right; `Ctrl-a -` splits top/bottom; the new pane takes focus
 - [ ] `Ctrl-a o` cycles panes; focus follows
-- [ ] `Ctrl-a z` zooms the active pane (1-cell margin box, `Z` flag in status bar), toggle restores
+- [ ] `Ctrl-a z` floats the active pane (centered, at least 2% margins, `Z` flag), toggle restores
+- [ ] double-click a pane zooms it; double-click the floating pane restores the split
 - [ ] click a pane to focus it; click a window name in the status bar to switch windows
 - [ ] drag a border: the pane resizes live and stays after detach/reattach
 - [ ] `Ctrl-a c` opens and focuses a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates

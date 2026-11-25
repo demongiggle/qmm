@@ -99,6 +99,12 @@ type ActionCyclePane struct{}
 // ActionToggleZoom toggles zoom on the active pane.
 type ActionToggleZoom struct{}
 
+// ActionTogglePaneZoom toggles zoom for a pane selected by a mouse
+// double-click. The pane is focused before it becomes the floating overlay.
+type ActionTogglePaneZoom struct {
+	PaneID int
+}
+
 // ActionResizePane grows/shrinks the active pane in Direction by Delta cells.
 type ActionResizePane struct {
 	Direction uint8
@@ -143,10 +149,13 @@ type Cell struct {
 }
 
 // PaneRect describes where a pane is rendered on screen (for client hit-testing).
+// Zoomed marks the floating overlay in a zoomed window; the underlying split
+// panes are also reported so they remain visible double-click targets.
 type PaneRect struct {
 	ID         int
 	X, Y, W, H int
 	Active     bool
+	Zoomed     bool
 }
 
 // Splitter describes an internal divider between panes (for drag-resize).
@@ -205,6 +214,7 @@ func init() {
 	gob.Register(ActionPrevWindow{})
 	gob.Register(ActionCyclePane{})
 	gob.Register(ActionToggleZoom{})
+	gob.Register(ActionTogglePaneZoom{})
 	gob.Register(ActionResizePane{})
 	gob.Register(ActionDragStart{})
 	gob.Register(ActionDragUpdate{})
@@ -278,6 +288,8 @@ func derefMessage(msg interface{}) interface{} {
 	case *ActionCyclePane:
 		return *m
 	case *ActionToggleZoom:
+		return *m
+	case *ActionTogglePaneZoom:
 		return *m
 	case *ActionResizePane:
 		return *m

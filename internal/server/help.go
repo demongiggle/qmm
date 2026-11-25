@@ -43,7 +43,7 @@ var helpSections = []helpSection{
 	{
 		Title: "Layout",
 		Items: []helpItem{
-			{"C-a z", "Toggle zoom"},
+			{"C-a z", "Floating zoom"},
 			{"C-a C-←/→/↑/↓", "Resize pane"},
 		},
 	},
@@ -60,6 +60,7 @@ var helpSections = []helpSection{
 		Title: "Mouse (no prefix)",
 		Items: []helpItem{
 			{"Click", "Focus pane"},
+			{"Double-click", "Zoom / restore"},
 			{"Tab click", "Switch window"},
 			{"Drag", "Resize divider"},
 		},

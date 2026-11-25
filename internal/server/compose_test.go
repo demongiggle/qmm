@@ -132,11 +132,23 @@ func TestComposePreservesPaneAndWindowColors(t *testing.T) {
 func TestComposeZoomFrame(t *testing.T) {
 	s := newTestSession()
 	s.windows[0].zoomed = true
+	outer, inner := zoomRects(80, 23)
 
-	// Zoom relayout sizes the zoomed pane to the inner area.
 	s.relayout(80, 23)
-	if w, h := s.panes[1].vt.Size(); w != 78 || h != 21 {
-		t.Fatalf("zoomed pane size = %dx%d, want 78x21", w, h)
+	if w, h := s.panes[1].vt.Size(); w != inner.W || h != inner.H {
+		t.Fatalf("zoomed pane size = %dx%d, want %dx%d", w, h, inner.W, inner.H)
+	}
+	// The split panes underneath keep their normal PTY sizes.
+	if w, h := s.panes[2].vt.Size(); w != 39 || h != 23 {
+		t.Fatalf("underlying pane size = %dx%d, want 39x23", w, h)
+	}
+	// Distinct output proves the underlying split remains visible in the
+	// margin while the active pane is also blitted into the floating overlay.
+	if _, err := s.panes[1].vt.Write([]byte("Z")); err != nil {
+		t.Fatalf("write zoomed pane: %v", err)
+	}
+	if _, err := s.panes[2].vt.Write([]byte(strings.Repeat(" ", 38) + "R")); err != nil {
+		t.Fatalf("write underlying pane: %v", err)
 	}
 
 	comp := &compositor{}
@@ -146,10 +158,10 @@ func TestComposeZoomFrame(t *testing.T) {
 		x, y int
 		want rune
 	}{
-		{0, 0, '┌'},
-		{79, 0, '┐'},
-		{0, 22, '└'},
-		{79, 22, '┘'},
+		{outer.X, outer.Y, '┌'},
+		{outer.Right() - 1, outer.Y, '┐'},
+		{outer.X, outer.Bottom() - 1, '└'},
+		{outer.Right() - 1, outer.Bottom() - 1, '┘'},
 	}
 	for _, c := range corners {
 		got := cellAt(f, c.x, c.y).Ch
@@ -157,14 +169,19 @@ func TestComposeZoomFrame(t *testing.T) {
 			t.Errorf("corner (%d,%d) = %q, want %q", c.x, c.y, got, c.want)
 		}
 	}
-	// Vertical edges
-	for y := 1; y < 22; y++ {
-		if got := cellAt(f, 0, y).Ch; got != '│' {
+	for y := outer.Y + 1; y < outer.Bottom()-1; y++ {
+		if got := cellAt(f, outer.X, y).Ch; got != '│' {
 			t.Fatalf("left edge y=%d = %q, want │", y, got)
 		}
-		if got := cellAt(f, 79, y).Ch; got != '│' {
+		if got := cellAt(f, outer.Right()-1, y).Ch; got != '│' {
 			t.Fatalf("right edge y=%d = %q, want │", y, got)
 		}
+	}
+	if got := cellAt(f, 79, 0).Ch; got != 'R' {
+		t.Errorf("underlying pane in right margin = %q, want R", got)
+	}
+	if got := cellAt(f, inner.X, inner.Y).Ch; got != 'Z' {
+		t.Errorf("floating pane content = %q, want Z", got)
 	}
 	// Status bar carries the zoom flag: "0:zsh*Z"
 	hasZ := false
@@ -176,8 +193,43 @@ func TestComposeZoomFrame(t *testing.T) {
 	if !hasZ {
 		t.Fatal("status bar missing zoom flag")
 	}
-	// Exactly one pane exposed.
-	if len(f.Panes) != 1 {
-		t.Fatalf("got %d panes, want 1 when zoomed", len(f.Panes))
+	// Two underlying hit targets plus the floating overlay are exposed.
+	if len(f.Panes) != 3 {
+		t.Fatalf("got %d panes, want 2 split panes plus the zoom overlay", len(f.Panes))
+	}
+	var overlays int
+	for _, p := range f.Panes {
+		if p.Zoomed {
+			overlays++
+			if p.ID != 1 || p.X != outer.X || p.Y != outer.Y || p.W != outer.W || p.H != outer.H || !p.Active {
+				t.Errorf("zoom overlay rect = %+v, want ID 1 at %+v", p, outer)
+			}
+		} else if p.Active {
+			t.Errorf("underlying pane %d is still active during zoom", p.ID)
+		}
+	}
+	if overlays != 1 {
+		t.Fatalf("got %d zoom overlays, want 1", overlays)
+	}
+	if len(f.Splitters) != 0 {
+		t.Fatalf("got %d splitters, want none when zoomed", len(f.Splitters))
+	}
+}
+
+func TestZoomRectsKeepCenteredTwoPercentMargins(t *testing.T) {
+	for _, tc := range []struct{ cols, rows int }{{80, 23}, {200, 100}, {40, 9}} {
+		outer, inner := zoomRects(tc.cols, tc.rows)
+		wantX := max(1, (tc.cols*zoomMarginPercent+99)/100)
+		wantY := max(1, (tc.rows*zoomMarginPercent+99)/100)
+		if outer.X != wantX || outer.Y != wantY ||
+			outer.Right() != tc.cols-wantX || outer.Bottom() != tc.rows-wantY {
+			t.Errorf("zoomRects(%d,%d) outer = %+v, want %d/%d margins on each side",
+				tc.cols, tc.rows, outer, wantX, wantY)
+		}
+		if inner.X != outer.X+1 || inner.Y != outer.Y+1 ||
+			inner.W != outer.W-2 || inner.H != outer.H-2 {
+			t.Errorf("zoomRects(%d,%d) inner = %+v, want one-cell inset from %+v",
+				tc.cols, tc.rows, inner, outer)
+		}
 	}
 }
