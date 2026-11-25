@@ -56,12 +56,13 @@ func (s *Server) openDisplayPanes(c *clientConn) {
 	c.helpOpen = false
 	c.helpTop = 0
 	c.confirmOpen = false
+	c.settingsOpen = false
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()
 	c.displayPanesOpen = true
 	c.displayPanesInput = ""
-	c.displayPanesDeadline = time.Now().Add(displayPanesTimeout)
+	c.displayPanesDeadline = time.Now().Add(s.sess.opts().paneNumberTimeoutDuration())
 	c.forceFull = true
 	s.broadcast()
 }
@@ -182,7 +183,7 @@ func (s *Server) commitDisplayPanesInput(c *clientConn, count int) {
 
 func (s *Server) refreshDisplayPanesDeadline(c *clientConn) {
 	if c.displayPanesInput == "" {
-		c.displayPanesDeadline = time.Now().Add(displayPanesTimeout)
+		c.displayPanesDeadline = time.Now().Add(s.sess.opts().paneNumberTimeoutDuration())
 	} else {
 		c.displayPanesDeadline = time.Now().Add(displayPanesDigitTimeout)
 	}
@@ -242,7 +243,7 @@ func (s *Server) selectDisplayPane(c *clientConn, number int) {
 // drawDisplayPanes paints a large numeral in the center of every pane and a
 // short hint in the status bar. The underlying pane output remains visible;
 // only the badge cells are covered.
-func (c *compositor) drawDisplayPanes(frame *protocol.Frame, setCell helpSetCell, cols, rows int) {
+func (c *compositor) drawDisplayPanes(frame *protocol.Frame, setCell helpSetCell, cols, rows int, showClock bool) {
 	if cols < minCols || rows < minRows {
 		return
 	}
@@ -265,7 +266,7 @@ func (c *compositor) drawDisplayPanes(frame *protocol.Frame, setCell helpSetCell
 	for _, p := range panes {
 		c.drawPaneNumber(setCell, p)
 	}
-	drawDisplayPanesHint(frame, setCell, cols, rows, maxNumber+1, c.displayPanesInput)
+	drawDisplayPanesHint(frame, setCell, cols, rows, maxNumber+1, c.displayPanesInput, showClock)
 }
 
 func clipPaneNumberRect(p protocol.PaneRect, cols, rows int) protocol.PaneRect {
@@ -339,7 +340,7 @@ func drawCompactPaneNumber(setCell helpSetCell, p protocol.PaneRect, label strin
 	}
 }
 
-func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows, count int, input string) {
+func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows, count int, input string, showClock bool) {
 	y := rows - 1
 	start := 0
 	for _, tab := range frame.Tabs {
@@ -348,7 +349,10 @@ func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows
 	if start < cols {
 		start++
 	}
-	end := cols - displayPanesClockWidth - 1
+	end := cols - 1
+	if showClock {
+		end = cols - displayPanesClockWidth - 1
+	}
 	width := end - start
 	if width <= 0 {
 		return

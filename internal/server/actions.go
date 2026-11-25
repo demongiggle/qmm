@@ -34,6 +34,16 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
+	// While the settings page is open, mouse/action messages dismiss the
+	// overlay instead of changing panes or windows underneath it.
+	if c.settingsOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			s.closeSettings(c)
+			return false
+		}
+	}
 	// While pane numbers are shown, mouse/action messages dismiss the
 	// transient overlay instead of focusing or resizing panes underneath it.
 	if c.displayPanesOpen {
@@ -263,6 +273,9 @@ func (s *Server) toggleZoom() {
 // togglePaneZoom handles a mouse double-click. Double-clicking the floating
 // pane restores the split; double-clicking an exposed pane zooms that pane.
 func (s *Server) togglePaneZoom(paneID int) {
+	if s.sess != nil && !s.sess.opts().doubleClickZoom() {
+		return
+	}
 	w := s.activeWindow()
 	if w == nil || !w.tree.Has(paneID) || s.sess.panes[paneID] == nil {
 		return
@@ -315,6 +328,9 @@ func (s *Server) resizePane(direction uint8, delta int) {
 	}
 	if delta == 0 {
 		delta = 2
+		if s.sess != nil {
+			delta = s.sess.opts().resizeStepCells()
+		}
 	}
 	if w.tree.Resize(w.activePane, dir, delta, s.contentRect()) {
 		s.relayout()
@@ -370,7 +386,7 @@ func repeatableBind(seq string, act func(s *Server, c *clientConn)) prefixBindin
 
 func repeatableResizeBind(seq string, direction uint8) prefixBinding {
 	return repeatableBind(seq, func(s *Server, _ *clientConn) {
-		s.resizePane(direction, 2)
+		s.resizePane(direction, 0)
 	})
 }
 
@@ -384,11 +400,20 @@ var prefixBindings = []prefixBinding{
 	prefixBind("p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }),
 	prefixBind("x", func(s *Server, c *clientConn) { s.killActivePane() }),
 	// tmux uses prefix+& for a confirmed destructive close. cogito has one
-	// session, so the chord asks before shutting down the whole server.
-	prefixBind("&", func(s *Server, c *clientConn) { s.openShutdownConfirm(c) }),
+	// session, so the chord normally asks before shutting down the whole
+	// server; the settings page can turn that confirmation off.
+	prefixBind("&", func(s *Server, c *clientConn) {
+		if s.sess != nil && !s.sess.opts().confirmShutdown() {
+			s.requestShutdown()
+			return
+		}
+		s.openShutdownConfirm(c)
+	}),
 	prefixBind("o", func(s *Server, c *clientConn) { s.cyclePane() }),
 	// tmux-style display-panes: number every pane, then accept the number.
 	prefixBind("q", func(s *Server, c *clientConn) { s.openDisplayPanes(c) }),
+	// Categorized, scrollable session settings.
+	prefixBind("s", func(s *Server, c *clientConn) { s.openSettings(c) }),
 	prefixBind("z", func(s *Server, c *clientConn) { s.toggleZoom() }),
 	prefixBind("d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }),
 	prefixBind("?", func(s *Server, c *clientConn) { s.toggleHelp(c) }),
@@ -417,6 +442,11 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 	if c.confirmOpen {
 		c.clearRepeat()
 		s.handleShutdownConfirmInput(c, data)
+		return
+	}
+	if c.settingsOpen {
+		c.clearRepeat()
+		s.handleSettingsInput(c, data)
 		return
 	}
 	// A number typed after the overlay's timeout belongs to the pane again.

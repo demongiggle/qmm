@@ -1,0 +1,559 @@
+package server
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/rivo/uniseg"
+
+	"github.com/demongiggle/cogito/internal/protocol"
+)
+
+const (
+	colSettingsSelectedBG int32 = 238
+	colSettingsSelectedFG int32 = 255
+)
+
+// settingID identifies one session option. String IDs make it easy to add
+// future categories without renumbering existing values.
+type settingID string
+
+const (
+	settingStatusClock     settingID = "status_clock"
+	settingBorderColor     settingID = "border_color"
+	settingPaneNumberTime  settingID = "pane_number_time"
+	settingDoubleClickZoom settingID = "double_click_zoom"
+	settingResizeStep      settingID = "resize_step"
+	settingAutoNameWindows settingID = "auto_name_windows"
+	settingConfirmShutdown settingID = "confirm_shutdown"
+)
+
+var (
+	onOffValues = []string{"On", "Off"}
+
+	borderColorNames = []string{"Green", "Cyan", "Yellow", "Magenta"}
+	borderColorCodes = []int32{46, 39, 226, 201}
+
+	paneTimeoutNames     = []string{"2s", "1s", "5s"}
+	paneTimeoutDurations = []time.Duration{displayPanesTimeout, time.Second, 5 * time.Second}
+
+	resizeStepNames  = []string{"1 cell", "2 cells", "4 cells"}
+	resizeStepValues = []int{1, 2, 4}
+)
+
+// settingDef is one adjustable row in the settings page. Default is an
+// index into Values, so the page and the behavior getters share one source
+// of truth.
+type settingDef struct {
+	ID      settingID
+	Label   string
+	Values  []string
+	Default int
+}
+
+type settingsSection struct {
+	Title   string
+	Options []settingDef
+}
+
+var settingsSections = []settingsSection{
+	{
+		Title: "Appearance",
+		Options: []settingDef{
+			{ID: settingStatusClock, Label: "Status bar clock", Values: onOffValues, Default: 0},
+			{ID: settingBorderColor, Label: "Active pane border", Values: borderColorNames, Default: 0},
+		},
+	},
+	{
+		Title: "Panes",
+		Options: []settingDef{
+			{ID: settingPaneNumberTime, Label: "Pane number timeout", Values: paneTimeoutNames, Default: 0},
+			{ID: settingDoubleClickZoom, Label: "Double-click zoom", Values: onOffValues, Default: 0},
+		},
+	},
+	{
+		Title: "Layout",
+		Options: []settingDef{
+			{ID: settingResizeStep, Label: "Keyboard resize step", Values: resizeStepNames, Default: 1},
+			{ID: settingAutoNameWindows, Label: "Automatic window names", Values: onOffValues, Default: 0},
+		},
+	},
+	{
+		Title: "Session",
+		Options: []settingDef{
+			{ID: settingConfirmShutdown, Label: "Confirm shutdown", Values: onOffValues, Default: 0},
+		},
+	},
+}
+
+// settingsState holds session-wide option values. The view (open, cursor,
+// scroll position) lives on each client, but changing a value affects every
+// attached client. Values are kept in memory for the server's lifetime.
+type settingsState struct {
+	values map[settingID]int
+}
+
+func defaultSettings() settingsState {
+	st := settingsState{values: make(map[settingID]int)}
+	for _, section := range settingsSections {
+		for _, def := range section.Options {
+			st.values[def.ID] = clampSettingDefault(def)
+		}
+	}
+	return st
+}
+
+func clampSettingDefault(def settingDef) int {
+	if def.Default < 0 || def.Default >= len(def.Values) {
+		return 0
+	}
+	return def.Default
+}
+
+// ensure fills in defaults, including options appended after the session
+// started. It never overwrites a value the user has already changed.
+func (st *settingsState) ensure() {
+	if st.values == nil {
+		st.values = make(map[settingID]int)
+	}
+	for id, idx := range defaultSettings().values {
+		if _, ok := st.values[id]; !ok {
+			st.values[id] = idx
+		}
+	}
+}
+
+// opts returns the session's settings, initializing defaults on first use.
+func (s *session) opts() *settingsState {
+	if s == nil {
+		return &settingsState{}
+	}
+	s.settings.ensure()
+	return &s.settings
+}
+
+func settingByID(id settingID) (settingDef, bool) {
+	for _, section := range settingsSections {
+		for _, def := range section.Options {
+			if def.ID == id {
+				return def, true
+			}
+		}
+	}
+	return settingDef{}, false
+}
+
+func (st *settingsState) index(def settingDef) int {
+	st.ensure()
+	if len(def.Values) == 0 {
+		return 0
+	}
+	idx, ok := st.values[def.ID]
+	if !ok {
+		idx = clampSettingDefault(def)
+	}
+	if idx < 0 || idx >= len(def.Values) {
+		idx = 0
+	}
+	return idx
+}
+
+func (st *settingsState) setIndex(def settingDef, idx int) {
+	st.ensure()
+	if len(def.Values) == 0 {
+		return
+	}
+	n := len(def.Values)
+	idx = ((idx % n) + n) % n
+	st.values[def.ID] = idx
+}
+
+func (st *settingsState) adjust(def settingDef, delta int) {
+	st.setIndex(def, st.index(def)+delta)
+}
+
+func (st *settingsState) text(def settingDef) string {
+	if len(def.Values) == 0 {
+		return ""
+	}
+	return def.Values[st.index(def)]
+}
+
+func (st *settingsState) setByID(id settingID, idx int) bool {
+	def, ok := settingByID(id)
+	if !ok {
+		return false
+	}
+	st.setIndex(def, idx)
+	return true
+}
+
+func (st *settingsState) boolSetting(id settingID, fallback bool) bool {
+	def, ok := settingByID(id)
+	if !ok {
+		return fallback
+	}
+	return st.index(def) == 0
+}
+
+func (st *settingsState) showClock() bool {
+	return st.boolSetting(settingStatusClock, true)
+}
+
+func (st *settingsState) borderColor() int32 {
+	def, ok := settingByID(settingBorderColor)
+	if !ok {
+		return int32(colBorderActive)
+	}
+	idx := st.index(def)
+	if idx < 0 || idx >= len(borderColorCodes) {
+		return int32(colBorderActive)
+	}
+	return borderColorCodes[idx]
+}
+
+func (st *settingsState) paneNumberTimeoutDuration() time.Duration {
+	def, ok := settingByID(settingPaneNumberTime)
+	if !ok {
+		return displayPanesTimeout
+	}
+	idx := st.index(def)
+	if idx < 0 || idx >= len(paneTimeoutDurations) {
+		return displayPanesTimeout
+	}
+	return paneTimeoutDurations[idx]
+}
+
+func (st *settingsState) doubleClickZoom() bool {
+	return st.boolSetting(settingDoubleClickZoom, true)
+}
+
+func (st *settingsState) resizeStepCells() int {
+	def, ok := settingByID(settingResizeStep)
+	if !ok {
+		return 2
+	}
+	idx := st.index(def)
+	if idx < 0 || idx >= len(resizeStepValues) {
+		return 2
+	}
+	return resizeStepValues[idx]
+}
+
+func (st *settingsState) autoNameWindows() bool {
+	return st.boolSetting(settingAutoNameWindows, true)
+}
+
+func (st *settingsState) confirmShutdown() bool {
+	return st.boolSetting(settingConfirmShutdown, true)
+}
+
+func settingsOptionCount() int {
+	count := 0
+	for _, section := range settingsSections {
+		count += len(section.Options)
+	}
+	return count
+}
+
+func settingDefAt(cursor int) (settingDef, bool) {
+	if cursor < 0 {
+		return settingDef{}, false
+	}
+	for _, section := range settingsSections {
+		for _, def := range section.Options {
+			if cursor == 0 {
+				return def, true
+			}
+			cursor--
+		}
+	}
+	return settingDef{}, false
+}
+
+type settingsLine struct {
+	header string
+	def    settingDef
+	option bool
+	cursor int
+	blank  bool
+}
+
+func settingsLines() []settingsLine {
+	lines := make([]settingsLine, 0)
+	cursor := 0
+	for i, section := range settingsSections {
+		lines = append(lines, settingsLine{header: section.Title})
+		for _, def := range section.Options {
+			lines = append(lines, settingsLine{def: def, option: true, cursor: cursor})
+			cursor++
+		}
+		if i < len(settingsSections)-1 {
+			lines = append(lines, settingsLine{blank: true})
+		}
+	}
+	return lines
+}
+
+type settingsView struct {
+	lines       []settingsLine
+	contentRows int
+	top         int
+	maxTop      int
+	scrollable  bool
+	lineCount   int
+	cursor      int
+}
+
+func buildSettingsView(cols, rows, cursor, top int) settingsView {
+	lines := settingsLines()
+	optionCount := 0
+	for _, line := range lines {
+		if line.option {
+			optionCount++
+		}
+	}
+	cursor = max(0, min(cursor, max(0, optionCount-1)))
+	selectedLine := 0
+	for i, line := range lines {
+		if line.option && line.cursor == cursor {
+			selectedLine = i
+			break
+		}
+	}
+	contentRows := helpContentRows(cols, rows)
+	maxTop := max(0, len(lines)-contentRows)
+	if selectedLine < top {
+		top = selectedLine
+	}
+	if selectedLine >= top+contentRows {
+		top = selectedLine - contentRows + 1
+	}
+	top = max(0, min(top, maxTop))
+	return settingsView{
+		lines:       lines,
+		contentRows: contentRows,
+		top:         top,
+		maxTop:      maxTop,
+		scrollable:  maxTop > 0,
+		lineCount:   len(lines),
+		cursor:      cursor,
+	}
+}
+
+func settingsScrollMetrics(cols, rows int) (page, maxTop int) {
+	v := buildSettingsView(cols, rows, 0, 0)
+	return max(1, v.contentRows), v.maxTop
+}
+
+func (s *Server) settingsSyncView(c *clientConn) settingsView {
+	v := buildSettingsView(s.cols, s.rows, c.settingsCursor, c.settingsTop)
+	c.settingsCursor, c.settingsTop = v.cursor, v.top
+	return v
+}
+
+// openSettings shows the categorized settings page on one client. Like help
+// and confirmation, the view is local; option values are session-wide.
+func (s *Server) openSettings(c *clientConn) {
+	c.helpOpen = false
+	c.helpTop = 0
+	c.confirmOpen = false
+	c.displayPanesOpen = false
+	c.displayPanesInput = ""
+	c.displayPanesDeadline = time.Time{}
+	c.prefixArmed = false
+	c.prefixBuf = nil
+	c.clearRepeat()
+	c.settingsOpen = true
+	c.settingsCursor = 0
+	c.settingsTop = 0
+	s.settingsSyncView(c)
+	c.forceFull = true
+	s.sess.opts().ensure()
+	s.broadcast()
+}
+
+func (s *Server) closeSettings(c *clientConn) {
+	if !c.settingsOpen {
+		return
+	}
+	c.settingsOpen = false
+	c.prefixArmed = false
+	c.prefixBuf = nil
+	c.clearRepeat()
+	c.forceFull = true
+	s.broadcast()
+}
+
+// handleSettingsInput consumes keys while the settings page is open.
+// Navigation follows the help menu; left/right, Enter, Space and Tab change
+// the selected option. Unknown keys are swallowed, not sent to a pane.
+func (s *Server) handleSettingsInput(c *clientConn, data []byte) {
+	seq := string(data)
+	view := buildSettingsView(s.cols, s.rows, c.settingsCursor, c.settingsTop)
+	switch {
+	case isHelpNav(seq, "A", "k"):
+		s.settingsMoveCursor(c, -1)
+	case isHelpNav(seq, "B", "j"):
+		s.settingsMoveCursor(c, 1)
+	case isHelpNav(seq, "5~", "b"), seq == "\x02":
+		s.settingsMoveCursor(c, -view.contentRows)
+	case isHelpNav(seq, "6~", "f"), seq == "\x06":
+		s.settingsMoveCursor(c, view.contentRows)
+	case isHelpNav(seq, "H", "g"):
+		s.settingsMoveCursor(c, -settingsOptionCount())
+	case isHelpNav(seq, "F", "G"):
+		s.settingsMoveCursor(c, settingsOptionCount())
+	case isHelpNav(seq, "C", "l"), seq == "\t", seq == "\r", seq == "\n", seq == " ":
+		s.settingsAdjust(c, 1)
+	case isHelpNav(seq, "D", "h"), seq == "\x1b[Z":
+		s.settingsAdjust(c, -1)
+	case seq == "\x1b", seq == "\x03", seq == "q", seq == "Q", seq == "s", seq == "S", seq == "\x01s":
+		s.closeSettings(c)
+	default:
+		// Keep the page open; a stray key must not reach the shell.
+	}
+}
+
+func (s *Server) settingsMoveCursor(c *clientConn, delta int) {
+	count := settingsOptionCount()
+	if count == 0 {
+		return
+	}
+	c.settingsCursor = max(0, min(c.settingsCursor+delta, count-1))
+	s.settingsSyncView(c)
+	c.forceFull = true
+	s.broadcast()
+}
+
+func (s *Server) settingsAdjust(c *clientConn, delta int) {
+	def, ok := settingDefAt(c.settingsCursor)
+	if !ok {
+		return
+	}
+	s.sess.opts().adjust(def, delta)
+	s.settingsSyncView(c)
+	// Chrome-wide settings (clock, colors, tab width) need a full repaint.
+	s.needFull = true
+	c.forceFull = true
+	s.broadcast()
+}
+
+func settingsFooter(view settingsView) string {
+	if view.scrollable {
+		first := view.top + 1
+		last := min(view.lineCount, view.top+view.contentRows)
+		return fmt.Sprintf(" ↑/↓ ←/→ %d-%d/%d q/Esc close ", first, last, view.lineCount)
+	}
+	return " ↑/↓ ←/→/Enter q/Esc close "
+}
+
+// drawSettings renders an opaque, categorized, scrollable settings page.
+func (c *compositor) drawSettings(frame *protocol.Frame, setCell helpSetCell, cols, rows int, opts *settingsState) {
+	if cols < minCols || rows < minRows {
+		return
+	}
+	if opts == nil {
+		opts = &settingsState{}
+	}
+	view := buildSettingsView(cols, rows, c.settingsCursor, c.settingsTop)
+	c.settingsCursor, c.settingsTop = view.cursor, view.top
+	frame.CursorVisible = false
+	frame.CursorX, frame.CursorY = 0, 0
+	frame.Panes = nil
+	frame.Splitters = nil
+	frame.Tabs = nil
+
+	for y := 0; y < max(0, rows-statusRows); y++ {
+		for x := 0; x < cols; x++ {
+			setCell(x, y, ' ', colHelpMuted, colHelpBackdrop, 0)
+		}
+	}
+
+	x0, y0, x1, y1 := helpBox(cols, rows)
+	for y := y0; y <= y1; y++ {
+		for x := x0; x <= x1; x++ {
+			setCell(x, y, ' ', colHelpFG, colHelpPanelBG, 0)
+		}
+	}
+	drawHelpFrame(setCell, x0, y0, x1, y1)
+
+	titleWidth := max(0, x1-x0-3)
+	putHelpText(setCell, x0+2, y0, titleWidth, " COGITO SETTINGS · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y1, titleWidth, fitHelpText(settingsFooter(view), titleWidth), colHelpMuted, colHelpPanelBG, 0)
+
+	innerX := x0 + 2
+	innerRight := x1 - 2
+	width := max(1, innerRight-innerX+1)
+	scrollX := -1
+	if view.scrollable {
+		width = max(1, width-1)
+		scrollX = innerRight
+		drawHelpScrollbar(setCell, scrollX, y0+1, view.contentRows, helpView{
+			contentRows: view.contentRows,
+			scrollable:  view.scrollable,
+			top:         view.top,
+			maxTop:      view.maxTop,
+			lineCount:   view.lineCount,
+		})
+	}
+	for i := 0; i < view.contentRows; i++ {
+		idx := view.top + i
+		if idx >= len(view.lines) {
+			break
+		}
+		drawSettingsLine(setCell, innerX, y0+1+i, width, view.lines[idx], view.cursor, opts)
+	}
+}
+
+func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, cursor int, opts *settingsState) {
+	if line.blank {
+		return
+	}
+	if line.header != "" {
+		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", colHelpHeader, colHelpPanelBG, protocol.StyleBold)
+		for i := used + 1; i < width; i++ {
+			setCell(x+i, y, '─', colHelpMuted, colHelpPanelBG, 0)
+		}
+		return
+	}
+	if !line.option {
+		return
+	}
+
+	selected := line.cursor == cursor
+	fg, bg := int32(colHelpFG), int32(colHelpPanelBG)
+	if selected {
+		fg, bg = colSettingsSelectedFG, colSettingsSelectedBG
+	}
+	for i := 0; i < width; i++ {
+		setCell(x+i, y, ' ', fg, bg, 0)
+	}
+
+	value := "[" + opts.text(line.def) + "]"
+	valueWidth := uniseg.StringWidth(value)
+	if valueWidth+4 > width {
+		valueWidth = max(1, width-2)
+		value = fitHelpText(value, valueWidth)
+	}
+	labelWidth := max(1, width-valueWidth-4)
+	prefix := "  "
+	if selected {
+		prefix = "▸ "
+	}
+	var style uint8
+	if selected {
+		style = protocol.StyleBold
+	}
+	putHelpText(setCell, x+1, y, labelWidth, fitHelpText(prefix+line.def.Label, labelWidth), fg, bg, style)
+
+	valueX := x + width - valueWidth - 1
+	vfg, vbg := int32(colHelpKeyFG), int32(colHelpKeyBG)
+	if selected {
+		vfg, vbg = int32(colBarActiveFG), opts.borderColor()
+	}
+	for i := 0; i < valueWidth; i++ {
+		setCell(valueX+i, y, ' ', vfg, vbg, protocol.StyleBold)
+	}
+	putHelpText(setCell, valueX, y, valueWidth, value, vfg, vbg, protocol.StyleBold)
+}

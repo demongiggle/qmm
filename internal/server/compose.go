@@ -64,6 +64,10 @@ type compositor struct {
 
 	displayPanes      bool
 	displayPanesInput string
+
+	settingsOpen   bool
+	settingsCursor int
+	settingsTop    int
 }
 
 func blankCell(row, col int) protocol.Cell {
@@ -86,6 +90,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 
 	frame := protocol.Frame{Cols: cols, Rows: rows}
 	w := s.activeWindow()
+	opts := s.opts()
+	showClock := opts.showClock()
+	activeColor := opts.borderColor()
 	paneNumbers := make(map[int]int)
 	for n, id := range s.windowPaneIDs(w) {
 		paneNumbers[id] = n
@@ -95,8 +102,10 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)
 		} else if c.helpOpen {
 			c.drawHelp(&frame, setCell, cols, rows)
+		} else if c.settingsOpen {
+			c.drawSettings(&frame, setCell, cols, rows, opts)
 		} else if c.displayPanes {
-			c.drawDisplayPanes(&frame, setCell, cols, rows)
+			c.drawDisplayPanes(&frame, setCell, cols, rows, showClock)
 		}
 		// Keep pane metadata deterministic despite the layout's rect map.
 		// The client gives zoom overlays priority regardless of this order.
@@ -189,7 +198,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			x, y := idx%cols, idx/cols
 			color := int32(colBorder)
 			if haveActive && borderTouchesRect(x, y, m, activeRect) {
-				color = colBorderActive
+				color = activeColor
 			}
 			setCell(x, y, ch, color, colDefault, 0)
 		}
@@ -227,12 +236,12 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				x0, y0 := outer.X, outer.Y
 				x1, y1 := outer.Right()-1, outer.Bottom()-1
 				for x := x0; x <= x1; x++ {
-					setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), colBorderActive, colDefault, 0)
-					setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), colBorderActive, colDefault, 0)
+					setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), activeColor, colDefault, 0)
+					setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), activeColor, colDefault, 0)
 				}
 				for y := y0 + 1; y < y1; y++ {
-					setCell(x0, y, '│', colBorderActive, colDefault, 0)
-					setCell(x1, y, '│', colBorderActive, colDefault, 0)
+					setCell(x0, y, '│', activeColor, colDefault, 0)
+					setCell(x1, y, '│', activeColor, colDefault, 0)
 				}
 				frame.Panes = append(frame.Panes, protocol.PaneRect{
 					ID: w.activePane, Number: paneNumbers[w.activePane], X: outer.X, Y: outer.Y,
@@ -248,6 +257,10 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		setCell(x, sbY, ' ', colBarFG, colBarBG, 0)
 	}
 	col := 0
+	reserve := 0
+	if showClock {
+		reserve = displayPanesClockWidth + 2 // clock plus a small gap
+	}
 	for _, idx := range s.sortedWindowIndices() {
 		ww := s.windows[idx]
 		label := fmt.Sprintf(" %d:%s", idx, ww.name)
@@ -260,8 +273,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		}
 		label += " "
 		runes := []rune(label)
-		if col+len(runes) > cols-10 { // leave room for the clock
-			truncated := string(runes[:max(0, cols-10-col)]) + "…"
+		if col+len(runes) > cols-reserve {
+			truncated := string(runes[:max(0, cols-reserve-col)]) + "…"
 			runes = []rune(truncated)
 		}
 		start := col
@@ -269,7 +282,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			fg, bg := int32(colBarFG), int32(colBarBG)
 			var st uint8
 			if isActive {
-				fg, bg = colBarActiveFG, colBarActiveBG
+				fg, bg = colBarActiveFG, activeColor
 				st = protocol.StyleBold
 			}
 			setCell(col, sbY, r, fg, bg, st)
@@ -277,13 +290,15 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		}
 		frame.Tabs = append(frame.Tabs, protocol.Tab{Index: idx, Start: start, End: col, Name: ww.name, Active: isActive, Zoomed: ww.zoomed})
 		col++ // separator gap
-		if col >= cols-10 {
+		if col >= cols-reserve {
 			break
 		}
 	}
-	clock := time.Now().Format("15:04:05")
-	for i, r := range []rune(clock) {
-		setCell(cols-len(clock)+i, sbY, r, colBarFG, colBarBG, 0)
+	if showClock {
+		clock := time.Now().Format("15:04:05")
+		for i, r := range []rune(clock) {
+			setCell(cols-len(clock)+i, sbY, r, colBarFG, colBarBG, 0)
+		}
 	}
 
 	return render()

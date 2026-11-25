@@ -15,6 +15,7 @@ func newTestSession() *session {
 		windows:    map[int]*window{},
 		panes:      map[int]*pane{},
 		nextPaneID: 3,
+		settings:   defaultSettings(),
 	}
 	tree := layout.New(1)
 	tree.Split(1, 2, layout.Vertical)

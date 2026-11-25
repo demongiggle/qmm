@@ -110,6 +110,12 @@ type clientConn struct {
 	displayPanesInput    string
 	displayPanesDeadline time.Time
 
+	// prefix+s opens a categorized settings page. Option values are shared,
+	// but the cursor and scroll position are local to this client.
+	settingsOpen   bool
+	settingsCursor int
+	settingsTop    int
+
 	// Prefix-key state machine.
 	prefixArmed bool
 	prefixAt    time.Time
@@ -426,14 +432,22 @@ func (s *Server) broadcast() {
 		c.comp.confirmOpen = c.confirmOpen
 		c.comp.displayPanes = c.displayPanesOpen
 		c.comp.displayPanesInput = c.displayPanesInput
+		c.comp.settingsOpen = c.settingsOpen
+		c.comp.settingsCursor = c.settingsCursor
+		c.comp.settingsTop = c.settingsTop
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
 		c.forceFull = false
 		c.helpTop = c.comp.helpTop
+		c.settingsCursor = c.comp.settingsCursor
+		c.settingsTop = c.comp.settingsTop
 		c.enqueueFrame(frame)
 	}
 }
 
 func (s *Server) refreshWindowNames() {
+	if !s.sess.opts().autoNameWindows() {
+		return
+	}
 	for _, w := range s.sess.windows {
 		p := s.sess.panes[w.activePane]
 		if p == nil {

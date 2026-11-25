@@ -27,9 +27,11 @@ detach/attach — nothing else yet.
 - **Color**: pane output keeps ANSI 16/256-color and 24-bit RGB styling;
   active pane borders, window tabs, and the help overlay are color-coded
 - **Interactive help** (`prefix` `?`): categorized, color-coded key cheatsheet
+- **Interactive settings** (`prefix` `s`): categorized, scrollable options for
+  appearance, panes, layout, and session behavior
 - **Confirmed shutdown** (`prefix` `&`): a modal y/n dialog before ending the
   session and all its panes
-- Windows are auto-named after the foreground process
+- Windows are auto-named after the foreground process (configurable)
 - Multiple clients may attach to the same session; the effective size is the
   smallest attached terminal (tmux-style)
 
@@ -83,6 +85,7 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `n` / `p`| Next / previous window              |
 | `prefix` `o`      | Cycle to next pane                  |
 | `prefix` `q`      | Show pane numbers / jump to pane   |
+| `prefix` `s`      | Open categorized settings page    |
 | `prefix` `x`      | Kill current pane                   |
 | `prefix` `&`      | Shut down session (confirm)          |
 | `prefix` `z`      | Toggle floating pane zoom           |
@@ -110,16 +113,27 @@ two-digit number waits briefly: type the next digit, press Enter to accept
 the first digit, or wait for it to be selected automatically. Jumping to a
 hidden pane from a zoomed window restores the split layout.
 
-Like tmux's destructive `&` chord, `prefix` `&` opens a modal confirmation
-dialog before ending cogito's single session. Press `y` (or Enter) to shut
-down every window and pane; `n`, `q`, `Esc`, or `Ctrl-c` cancels. Other keys
-are swallowed while the dialog is open. The dialog is local to the attached
-client; `cogito kill-server` still shuts down immediately without a prompt.
+Unless the **Confirm shutdown** setting is off, tmux's destructive `&` chord
+opens a modal confirmation dialog before ending cogito's single session.
+Press `y` (or Enter) to shut down every window and pane; `n`, `q`, `Esc`, or
+`Ctrl-c` cancels. Other keys are swallowed while the dialog is open. The
+dialog is local to the attached client; `cogito kill-server` still shuts down
+immediately without a prompt.
 
 Press `prefix` `?` for a color-coded cheatsheet of pane, window, layout,
 session, and mouse commands. On short terminals, use `↑` / `↓`, `PgUp` / `PgDn`,
 or `j` / `k` to scroll; press `Esc`, `q`, or almost any other key to close it.
 The menu is local to the attached client.
+
+`prefix` `s` opens the settings page. Options are grouped into categories and
+the list scrolls automatically as more options are added. Use `↑` / `↓` (or
+`j` / `k`), `PgUp` / `PgDn`, `Home` / `End`, or `g` / `G` to move; press
+`←` / `→` (or `h` / `l`), Enter, Space, or Tab to cycle the selected value.
+`q`, `Esc`, `Ctrl-c`, `s`, or `prefix` `s` closes the page. Settings include
+the status clock, active border color, pane-number timeout, double-click zoom,
+keyboard resize step, automatic window names, and shutdown confirmation.
+Values are shared by all attached clients for the server's lifetime; they are
+not written to a config file and reset when the server exits.
 
 Mouse: click a pane to focus it; double-click a pane to float it above the
 split as a centered zoom overlay, or double-click the floating pane to restore
@@ -185,6 +199,7 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] `Ctrl-a c` opens and focuses a window; `Ctrl-a n` / `Ctrl-a p` switch; status bar updates
 - [ ] type in a pane, `Ctrl-a d` detaches, `cogito attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
+- [ ] `Ctrl-a s` opens categorized settings; arrows scroll and `←` / `→` change a visible setting
 - [ ] `Ctrl-a &` opens shutdown confirmation; `n` / `Esc` cancels; `y` ends the server
 - [ ] `Ctrl-a Ctrl-Left/Right/Up/Down` resizes; holding Ctrl and repeating the arrow resizes without another prefix
 - [ ] kill the pane (`Ctrl-a x`): window closes; killing the last pane quits everything
@@ -201,6 +216,7 @@ button held is `... 32 ; COL ; ROW M` (coordinates 1-based).
 
 - Linux only
 - No scrollback or copy mode
-- No config file, no plugins, no theming
+- No persisted config file, plugins, or full theming; settings are
+  session-only
 - Single unnamed session
 - No window renaming, no reordering

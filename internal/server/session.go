@@ -48,6 +48,7 @@ type session struct {
 	active     int
 	nextPaneID int
 	panes      map[int]*pane
+	settings   settingsState
 
 	// exitCh receives pane IDs whose child process has exited.
 	exitCh chan int
@@ -57,7 +58,11 @@ type session struct {
 }
 
 func newSession() *session {
-	s := &session{windows: map[int]*window{}, panes: map[int]*pane{}}
+	s := &session{
+		windows:  map[int]*window{},
+		panes:    map[int]*pane{},
+		settings: defaultSettings(),
+	}
 	return s
 }
 
@@ -225,10 +230,11 @@ func (s *session) newWindow(cols, rows int) (*window, error) {
 	w.activePane = p.id
 	s.windows[idx] = w
 	s.active = idx
-	if n, _ := fgInfo(p); n != "" {
-		w.name = n
-	} else {
-		w.name = fmt.Sprintf("window %d", idx)
+	w.name = fmt.Sprintf("window %d", idx)
+	if s.opts().autoNameWindows() {
+		if n, _ := fgInfo(p); n != "" {
+			w.name = n
+		}
 	}
 	return w, nil
 }
