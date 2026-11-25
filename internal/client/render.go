@@ -121,6 +121,7 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 		}
 		delta := axis - a.lastDragAxis
 		if delta != 0 {
+			debugLog("drag update splitter=%d delta=%d", a.dragID, delta)
 			_ = a.codec.Send(protocol.ActionDragUpdate{Splitter: a.dragID, Delta: delta})
 			a.lastDragAxis = axis
 		}
@@ -149,6 +150,7 @@ func (a *attach) handlePress(x, y int) bool {
 	}
 	// Border drag: grab the splitter cell itself (clicking the adjacent pane
 	// must focus it instead of starting a drag).
+	debugLog("press at %d,%d; %d splitters", x, y, len(a.frame.Splitters))
 	for _, sp := range a.frame.Splitters {
 		var onBorder bool
 		if sp.Vertical {
@@ -167,6 +169,7 @@ func (a *attach) handlePress(x, y int) bool {
 		} else {
 			a.lastDragAxis = y
 		}
+		debugLog("drag start splitter=%d vertical=%v at %d", sp.ID, sp.Vertical, a.lastDragAxis)
 		_ = a.codec.Send(protocol.ActionDragStart{Splitter: sp.ID})
 		return true
 	}
