@@ -70,8 +70,8 @@ Server logs are written to `server.log` next to the socket.
 
 | Keys              | Action                              |
 |-------------------|-------------------------------------|
-| `prefix` `%`      | Split left/right                    |
-| `prefix` `"`      | Split top/bottom                    |
+| `prefix` `\|`     | Split left/right                    |
+| `prefix` `-`      | Split top/bottom                    |
 | `prefix` `c`      | New window                          |
 | `prefix` `n` / `p`| Next / previous window              |
 | `prefix` `o`      | Cycle to next pane                  |
@@ -81,6 +81,9 @@ Server logs are written to `server.log` next to the socket.
 | `prefix` `Ctrl-←/→/↑/↓` | Resize pane                    |
 | `prefix` `Ctrl-a` | Send a literal `Ctrl-a` to the app  |
 | `prefix` `?`      | Show categorized key help           |
+
+The split keys match the divider they draw: `|` separates left/right panes,
+`-` separates top/bottom panes.
 
 Press `prefix` `?` for a color-coded cheatsheet of pane, window, layout,
 session, and mouse commands. On short terminals, use `↑` / `↓`, `PgUp` / `PgDn`,
@@ -139,7 +142,7 @@ COGITO_SOCKET_DIR=$(mktemp -d) script -qec ./cogito /tmp/cogito.log
 - [ ] `cogito` starts a session: shell appears, status bar shows `0:<name>*` + clock
 - [ ] `printf '\033[31mred\033[0m \033[48;5;22mgreen\033[0m\n'` shows colors in a pane
 - [ ] active pane border, active window tab, and `Ctrl-a ?` help are color-coded
-- [ ] `Ctrl-a %` splits left/right; `Ctrl-a "` splits top/bottom; borders render
+- [ ] `Ctrl-a |` splits left/right; `Ctrl-a -` splits top/bottom; borders render
 - [ ] `Ctrl-a o` cycles panes; focus follows
 - [ ] `Ctrl-a z` zooms the active pane (1-cell margin box, `Z` flag in status bar), toggle restores
 - [ ] click a pane to focus it; click a window name in the status bar to switch windows

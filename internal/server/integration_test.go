@@ -719,6 +719,58 @@ func TestHelpMenuViaPrefix(t *testing.T) {
 	}
 }
 
+// TestPrefixSplitBindings drives split keys through the real input stream:
+// "|" draws a vertical divider (left/right panes), "-" a horizontal one
+// (top/bottom panes).
+func TestPrefixSplitBindings(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+	_ = c.recvFrame()
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01|")}); err != nil {
+		t.Fatalf("prefix |: %v", err)
+	}
+	f := c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 2 })
+	if len(f.Splitters) != 1 || !f.Splitters[0].Vertical {
+		t.Fatalf("prefix | splitters = %+v, want one vertical divider", f.Splitters)
+	}
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x01-")}); err != nil {
+		t.Fatalf("prefix -: %v", err)
+	}
+	f = c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 3 })
+	horizontal := false
+	for _, sp := range f.Splitters {
+		if !sp.Vertical {
+			horizontal = true
+		}
+	}
+	if !horizontal {
+		t.Fatalf("prefix - splitters = %+v, want a horizontal divider", f.Splitters)
+	}
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
 func hasCell(f protocol.Frame, col, row int, ch rune) bool {
 	for _, c := range f.Cells {
 		if c.Col == col && c.Row == row {

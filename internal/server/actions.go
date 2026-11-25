@@ -305,9 +305,11 @@ type prefixBinding struct {
 	act func(s *Server, c *clientConn)
 }
 
+// Split keys mirror the divider they create: "|" puts a vertical divider
+// between left/right panes, "-" a horizontal divider between top/bottom ones.
 var prefixBindings = []prefixBinding{
-	{"%", func(s *Server, c *clientConn) { s.splitActive(layout.Vertical) }},
-	{"\"", func(s *Server, c *clientConn) { s.splitActive(layout.Horizontal) }},
+	{"|", func(s *Server, c *clientConn) { s.splitActive(layout.Vertical) }},
+	{"-", func(s *Server, c *clientConn) { s.splitActive(layout.Horizontal) }},
 	{"c", func(s *Server, c *clientConn) { s.newWindow() }},
 	{"n", func(s *Server, c *clientConn) { s.cycleWindow(1) }},
 	{"p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }},

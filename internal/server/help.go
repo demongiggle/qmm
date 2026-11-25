@@ -27,8 +27,8 @@ var helpSections = []helpSection{
 	{
 		Title: "Panes",
 		Items: []helpItem{
-			{"C-a %", "Split left/right"},
-			{`C-a "`, "Split top/bottom"},
+			{"C-a |", "Split left/right"},
+			{"C-a -", "Split top/bottom"},
 			{"C-a o", "Next pane"},
 			{"C-a x", "Close pane"},
 		},

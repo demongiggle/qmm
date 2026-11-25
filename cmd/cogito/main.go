@@ -65,8 +65,8 @@ Usage:
   cogito --version    Show version
 
 Inside cogito, press Ctrl-a to send a command prefix, followed by:
-  %%        split horizontally (new pane to the right)
-  "         split vertically (new pane below)
+  |         split left/right (new pane to the right)
+  -         split top/bottom (new pane below)
   c         new window
   n / p     next / previous window
   x         kill current pane

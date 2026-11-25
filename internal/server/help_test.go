@@ -43,6 +43,7 @@ func TestPrefixQuestionOpensStyledHelp(t *testing.T) {
 		"COGITO HELP", "PREFIX: Ctrl-a",
 		"PANES", "WINDOWS", "LAYOUT", "SESSION", "MOUSE",
 		"C-a ?", "Show this help", "Esc/q close",
+		"C-a |", "Split left/right", "C-a -", "Split top/bottom",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("help frame missing %q:\n%s", want, text)
