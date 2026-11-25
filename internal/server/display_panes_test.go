@@ -56,7 +56,7 @@ func TestPrefixQShowsStyledPaneNumbers(t *testing.T) {
 		t.Fatal("pane-number overlay should force a full repaint")
 	}
 	text := frameText(f)
-	for _, want := range []string{"000", "0 0", "111", "panes 0-1", "number selects"} {
+	for _, want := range []string{"███", "█ █", "╭", "╮", "panes 0-1", "number selects"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("pane-number frame missing %q:\n%s", want, text)
 		}
@@ -69,16 +69,26 @@ func TestPrefixQShowsStyledPaneNumbers(t *testing.T) {
 	}
 
 	activeStyled, inactiveStyled := false, false
+	activeBorder, inactiveBorder := false, false
 	for _, cell := range f.Cells {
-		if cell.FG == colPaneNumberActiveFG && cell.BG == colPaneNumberActiveBG && cell.Ch == '0' {
+		if cell.FG == colPaneNumberActiveFG && cell.BG == colPaneNumberActiveBG && cell.Ch == '█' {
 			activeStyled = true
 		}
-		if cell.FG == colPaneNumberFG && cell.BG == colPaneNumberBG && cell.Ch == '1' {
+		if cell.FG == colPaneNumberGlyph && cell.BG == colPaneNumberPanelBG && cell.Ch == '█' {
 			inactiveStyled = true
+		}
+		if cell.Ch == '╭' && cell.FG == colPaneNumberActiveBord {
+			activeBorder = true
+		}
+		if cell.Ch == '╭' && cell.FG == colPaneNumberBorder {
+			inactiveBorder = true
 		}
 	}
 	if !activeStyled || !inactiveStyled {
 		t.Errorf("missing pane-number styling: active=%v inactive=%v", activeStyled, inactiveStyled)
+	}
+	if !activeBorder || !inactiveBorder {
+		t.Errorf("missing rounded badge border: active=%v inactive=%v", activeBorder, inactiveBorder)
 	}
 }
 
@@ -86,7 +96,7 @@ func TestDisplayPanesFitsSmallTerminal(t *testing.T) {
 	comp := &compositor{displayPanes: true}
 	f := comp.compose(newTestSession(), 40, 10, true)
 	text := frameText(f)
-	for _, want := range []string{"000", "111", "0-1"} {
+	for _, want := range []string{"███", "╭", "0-1"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("small pane-number frame missing %q:\n%s", want, text)
 		}
@@ -96,7 +106,7 @@ func TestDisplayPanesFitsSmallTerminal(t *testing.T) {
 	}
 
 	tooSmall := (&compositor{displayPanes: true}).compose(newTestSession(), 20, 5, true)
-	if strings.Contains(frameText(tooSmall), "000") {
+	if strings.Contains(frameText(tooSmall), "███") {
 		t.Error("pane numbers should not cover the terminal-too-small notice")
 	}
 }

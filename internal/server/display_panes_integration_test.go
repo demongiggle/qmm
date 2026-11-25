@@ -59,7 +59,7 @@ func TestDisplayPaneNumbersViaPrefix(t *testing.T) {
 	}
 	overlay := c.waitForFrame(func(f protocol.Frame) bool {
 		text := frameText(f)
-		return f.Full && strings.Contains(text, "panes 0-1") && strings.Contains(text, "000")
+		return f.Full && strings.Contains(text, "panes 0-1") && strings.Contains(text, "███")
 	})
 	if activePaneNumber(overlay) != activeNumberBefore {
 		t.Fatalf("overlay active pane number = %d, want %d", activePaneNumber(overlay), activeNumberBefore)
