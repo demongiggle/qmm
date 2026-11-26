@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
@@ -18,37 +19,86 @@ func writePaneText(t *testing.T, s *Server, paneID int, text string) {
 	}
 }
 
-func TestSelectStartOpensCopyModeWithCharSelection(t *testing.T) {
+// startMouseSelection opens a mouse selection on the active pane and returns
+// it, asserting that no copy mode was entered on the way.
+func startMouseSelection(t *testing.T, s *Server, c *clientConn, x, y int) *selectionState {
+	t.Helper()
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: x, Y: y}})
+	if c.copyMode != nil {
+		t.Fatal("a mouse selection must not open copy mode")
+	}
+	if c.selection == nil {
+		t.Fatal("ActionSelectStart did not create a selection")
+	}
+	return c.selection
+}
+
+func TestSelectStartSnapshotsPaneWithoutCopyMode(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	writePaneText(t, s, 1, "hello world")
 
-	s.handleSelectStart(c, 0, 0)
-	st := c.copyMode
-	if st == nil || !st.open {
-		t.Fatal("ActionSelectStart did not open copy mode")
+	sel := startMouseSelection(t, s, c, 0, 0)
+	if sel.paneID != 1 {
+		t.Fatalf("paneID = %d, want 1", sel.paneID)
 	}
-	if !st.mouseOrigin {
-		t.Fatal("selection opened from a mouse gesture must set mouseOrigin")
+	if want := (layout.Rect{X: 0, Y: 0, W: 40, H: 23}); sel.rect != want {
+		t.Fatalf("rect = %+v, want %+v", sel.rect, want)
 	}
-	if st.selKind != selectionChar {
-		t.Fatalf("selKind = %v, want selectionChar", st.selKind)
+	// The pane is 23 rows tall, so the visible screen fills the snapshot and
+	// the viewport sits at the newest line.
+	if len(sel.lines) != 23 {
+		t.Fatalf("snapshot lines = %d, want 23", len(sel.lines))
 	}
-	if st.anchor != (copyPoint{line: 0, col: 0}) {
-		t.Fatalf("anchor = %+v, want {0 0}", st.anchor)
+	if sel.top != sel.maxTop() {
+		t.Fatalf("top = %d, want bottom of buffer %d", sel.top, sel.maxTop())
 	}
+	if sel.anchor != (copyPoint{line: 0, col: 0}) {
+		t.Fatalf("anchor = %+v, want {0 0}", sel.anchor)
+	}
+	if c.frame == nil {
+		t.Fatal("selection did not render a frame")
+	}
+	if c.frame.CursorVisible {
+		t.Fatal("selection view kept the live caret visible")
+	}
+}
 
-	s.handleSelectUpdate(c, 4, 0)
-	if got := st.cursor; got != (copyPoint{line: 0, col: 4}) {
+func TestSelectUpdateExtendsSelection(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	writePaneText(t, s, 1, "hello world")
+
+	sel := startMouseSelection(t, s, c, 0, 0)
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 4, Y: 0}})
+
+	if got := sel.cursor; got != (copyPoint{line: 0, col: 4}) {
 		t.Fatalf("cursor = %+v, want {0 4}", got)
 	}
-	if got := st.selectedText(); got != "hello" {
+	if got := sel.selectedText(); got != "hello" {
 		t.Fatalf("selected text = %q, want %q", got, "hello")
+	}
+}
+
+func TestSelectUpdateClampsToTheSelectedPane(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	sel := startMouseSelection(t, s, c, 0, 0)
+
+	// A drag past the pane's bottom-right corner clamps to its last cell and
+	// must not wander into the neighbouring pane.
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 500, Y: 500}})
+	if got, want := sel.cursor.line, len(sel.lines)-1; got != want {
+		t.Fatalf("cursor.line = %d, want %d", got, want)
+	}
+	if got, want := sel.cursor.col, 38; got != want {
+		t.Fatalf("cursor.col = %d, want %d", got, want)
 	}
 }
 
 func TestSelectUpdateWithoutStartIsIgnored(t *testing.T) {
 	s, c := newHelpServer(80, 24)
-	s.handleSelectUpdate(c, 3, 3)
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 3, Y: 3}})
+	if c.selection != nil {
+		t.Fatal("select update without start created a selection")
+	}
 	if c.copyMode != nil {
 		t.Fatal("select update without start opened copy mode")
 	}
@@ -63,7 +113,30 @@ func TestSelectUpdateIgnoredForKeyboardCopyMode(t *testing.T) {
 	}
 }
 
-func TestConfiguredCopyKeyCopiesAndCloses(t *testing.T) {
+func TestSelectStartWhileKeyboardCopyModeOpenReanchors(t *testing.T) {
+	s, c, st := newCopyModeFixture(80, 24, linesOf(10, "row %02d"))
+	st.cursor = copyPoint{line: 9, col: 4}
+	st.anchor = st.cursor
+	s.handleSelectStart(c, 2, 1)
+	if c.selection != nil {
+		t.Fatal("a drag inside copy mode must stay in copy mode")
+	}
+	if !st.mouseDrag {
+		t.Fatal("drag flag not set on re-anchor")
+	}
+	want := copyPoint{line: st.top + 1, col: 2}
+	if st.anchor != want {
+		t.Fatalf("anchor = %+v, want %+v", st.anchor, want)
+	}
+	if st.cursor != want {
+		t.Fatalf("cursor = %+v, want %+v", st.cursor, want)
+	}
+	if st.selKind != selectionChar {
+		t.Fatalf("selKind = %v, want selectionChar", st.selKind)
+	}
+}
+
+func TestConfiguredCopyKeyCopiesAndClosesSelection(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		key   string
@@ -83,13 +156,16 @@ func TestConfiguredCopyKeyCopiesAndCloses(t *testing.T) {
 					t.Fatal("failed to set copy key setting")
 				}
 			}
-			s.handleSelectStart(c, 0, 0)
-			s.handleSelectUpdate(c, 6, 0)
+			startMouseSelection(t, s, c, 0, 0)
+			s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 6, Y: 0}})
 
-			s.handleCopyModeInput(c, []byte(tc.bytes))
+			s.handleInput(c, []byte(tc.bytes))
 
+			if c.selection != nil {
+				t.Fatal("copy key did not clear the selection")
+			}
 			if c.copyMode != nil {
-				t.Fatal("copy key did not close copy mode")
+				t.Fatal("copy key opened copy mode")
 			}
 			clip, ok := queuedClipboard(c)
 			if !ok {
@@ -105,38 +181,50 @@ func TestConfiguredCopyKeyCopiesAndCloses(t *testing.T) {
 	}
 }
 
-func TestCopyKeyFallsBackForUnsetSetting(t *testing.T) {
-	st := defaultSettings()
-	st.values[settingCopyKey] = 999 // out of range: falls back to default
-	if got := copyKeySequence(&st); got != "\x1b[27;6;99~" {
-		t.Fatalf("out-of-range copy key = %q, want default Ctrl-Shift-C sequence", got)
-	}
-	if got := copyKeySequence(nil); got != "\x1b[27;6;99~" {
-		t.Fatalf("nil settings copy key = %q, want default Ctrl-Shift-C sequence", got)
-	}
-}
-
-func TestCtrlCCopiesActiveMouseSelection(t *testing.T) {
+func TestCopyKeyWithoutSelectionDoesNotCopy(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	writePaneText(t, s, 1, "clip me")
 
-	s.handleSelectStart(c, 0, 0)
-	s.handleSelectUpdate(c, 6, 0)
-	s.handleCopyModeInput(c, []byte("\x03"))
-
-	if c.copyMode != nil {
-		t.Fatal("Ctrl-C did not close copy mode")
+	s.handleInput(c, []byte("\x1b[27;6;99~"))
+	if _, ok := queuedClipboard(c); ok {
+		t.Fatal("copy key copied without a selection")
 	}
-	clip, ok := queuedClipboard(c)
-	if !ok {
-		t.Fatal("Ctrl-C did not enqueue a Clipboard message for a mouse selection")
-	}
-	if clip.Text != "clip me" {
-		t.Fatalf("clipboard = %q, want %q", clip.Text, "clip me")
+	if c.selection != nil {
+		t.Fatal("copy key created a selection")
 	}
 }
 
-func TestCtrlCQuitsWithoutSelection(t *testing.T) {
+func TestOrdinaryKeysReturnToTheLivePane(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{"printable", "x"},
+		{"esc", "\x1b"},
+		{"ctrl-c", "\x03"},
+		{"enter", "\r"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c := newHelpServer(80, 24)
+			writePaneText(t, s, 1, "hello world")
+			startMouseSelection(t, s, c, 0, 0)
+
+			s.handleInput(c, []byte(tc.key))
+
+			if c.selection != nil {
+				t.Fatal("key did not return to the live pane")
+			}
+			if _, ok := queuedClipboard(c); ok {
+				t.Fatal("a plain key copied the selection")
+			}
+			if c.copyMode != nil {
+				t.Fatal("a plain key opened copy mode")
+			}
+		})
+	}
+}
+
+func TestCtrlCQuitsKeyboardCopyModeWithoutSelection(t *testing.T) {
 	s, c, _ := newCopyModeFixture(80, 24, linesOf(10, "row %02d"))
 	// No v/V/Ctrl-v: selKind is selectionNone, so Ctrl-C must quit
 	// without copying (same as q/Esc).
@@ -167,118 +255,219 @@ func TestCtrlCCopiesKeyboardSelection(t *testing.T) {
 }
 
 func TestWheelExtendsMouseSelectionIntoScrollback(t *testing.T) {
-	s, c, st := newCopyModeFixture(80, 24, linesOf(40, "row %02d"))
-	st.mouseOrigin = true
-	st.selKind = selectionChar
-	st.anchor = copyPoint{line: 30, col: 0}
-	st.cursor = copyPoint{line: 30, col: 0}
-	st.ensureVisible()
-	topBefore := st.top
-	if topBefore == 0 {
+	s, c := newHelpServer(80, 24)
+	sel := &selectionState{
+		paneID: 1,
+		lines:  linesOf(40, "row %02d"),
+		rect:   layout.Rect{X: 0, Y: 0, W: 80, H: 23},
+	}
+	sel.top = sel.maxTop()
+	if sel.top == 0 {
 		t.Fatal("fixture expected a scrolled-down viewport")
 	}
+	sel.anchor = copyPoint{line: 25, col: 0}
+	sel.cursor = sel.anchor
+	c.selection = sel
+
 	s.handleWheel(c, -1) // wheel up one notch
-	if st.top != max(topBefore-wheelStepLines, 0) {
-		t.Fatalf("top = %d, want %d", st.top, max(topBefore-wheelStepLines, 0))
+
+	wantTop := sel.maxTop() - wheelStepLines
+	if sel.top != wantTop {
+		t.Fatalf("top = %d, want %d", sel.top, wantTop)
 	}
-	if st.cursor.line != 30-(topBefore-st.top) {
-		t.Fatalf("cursor.line = %d, want it to ride the view upward into scrollback", st.cursor.line)
+	if got, want := sel.cursor.line, 25-wheelStepLines; got != want {
+		t.Fatalf("cursor.line = %d, want it to ride the view upward into scrollback", got)
 	}
-	if a, b := st.selectionBounds(); b.line < a.line {
-		t.Fatalf("inverted bounds after wheel: %+v %+v", a, b)
+	if !sel.inSelection(sel.cursor.line, 0) || !sel.inSelection(25, 0) {
+		t.Fatalf("selection bounds do not cover the extended range: %+v..%+v", sel.anchor, sel.cursor)
+	}
+	if c.copyMode != nil {
+		t.Fatal("wheel with a selection must not enter copy mode")
 	}
 }
 
-func TestMouseSelectActionsSwallowedWhileSettingsOpen(t *testing.T) {
+func TestWheelDownAtNewestLineEndsSelection(t *testing.T) {
 	s, c := newHelpServer(80, 24)
-	c.settingsOpen = true
-	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: 1, Y: 1}})
-	if c.copyMode != nil {
-		t.Fatal("selection start leaked through the settings modal")
+	sel := &selectionState{
+		paneID: 1,
+		lines:  linesOf(40, "row %02d"),
+		rect:   layout.Rect{X: 0, Y: 0, W: 80, H: 23},
 	}
-	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 2, Y: 2}})
-	if c.copyMode != nil {
-		t.Fatal("selection update leaked through the settings modal")
+	sel.top = sel.maxTop()
+	sel.anchor = copyPoint{line: 30, col: 0}
+	sel.cursor = sel.anchor
+	c.selection = sel
+
+	s.handleWheel(c, 1)
+	if c.selection != nil {
+		t.Fatal("wheel-down at the newest line did not end the selection")
 	}
 }
 
-func TestMouseSelectionKeepsNormalStatusBar(t *testing.T) {
+func TestMouseSelectionKeepsLiveStatusBarAndCursorHidden(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	writePaneText(t, s, 1, "hello world")
 
-	s.handleSelectStart(c, 0, 0)
-	s.handleSelectUpdate(c, 4, 0)
+	startMouseSelection(t, s, c, 0, 0)
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 4, Y: 0}})
 	if c.frame == nil {
 		t.Fatal("no frame after selection update")
 	}
 	text := frameText(*c.frame)
 	if strings.Contains(text, "[copy mode]") {
-		t.Fatal("mouse-origin selection rendered the copy-mode hint bar")
+		t.Fatal("a mouse selection rendered the copy-mode hint bar")
 	}
 	if !strings.Contains(text, "0:zsh") {
-		t.Fatal("mouse-origin selection did not keep the normal status bar")
+		t.Fatal("a mouse selection lost the normal status bar")
 	}
 	if len(c.frame.Tabs) == 0 {
-		t.Fatal("mouse-origin selection did not keep status bar tabs hit-testable")
+		t.Fatal("a mouse selection lost the status bar tab hit zones")
 	}
-
-	// A keyboard-opened copy mode keeps the copy hint instead.
-	c2 := newHelpClient()
-	s.clients[c2] = struct{}{}
-	c2.copyMode = &copyModeState{
-		open:   true,
-		paneID: 1,
-		lines:  []copyLine{lineOf("hello world")},
-		cols:   80,
-		rows:   24,
+	if c.frame.CursorVisible {
+		t.Fatal("a frozen selection view must hide the pane caret")
 	}
-	c2.forceFull = true
-	s.broadcast()
-	if c2.frame == nil {
-		t.Fatal("no frame for keyboard copy mode")
-	}
-	text = frameText(*c2.frame)
-	if !strings.Contains(text, "[copy mode]") {
-		t.Fatal("keyboard copy mode lost the hint bar")
+	// The pane snapshot is drawn in place: the pane is still a hit target.
+	if len(c.frame.Panes) != 2 {
+		t.Fatalf("frame has %d pane rects, want 2", len(c.frame.Panes))
 	}
 }
 
-func TestMouseSelectionCopyFlowRestoresLiveMode(t *testing.T) {
+func TestMouseSelectionHighlightStaysInItsPane(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	writePaneText(t, s, 1, "hello world")
 
-	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: 0, Y: 0}})
+	startMouseSelection(t, s, c, 0, 0)
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 4, Y: 0}})
-	s.handleCopyModeInput(c, []byte("\x1b[27;6;99~"))
-
-	if c.copyMode != nil {
-		t.Fatal("copy did not close copy mode")
+	if c.frame == nil {
+		t.Fatal("no frame after selection update")
 	}
-	clip, ok := queuedClipboard(c)
-	if !ok {
-		t.Fatal("no Clipboard message after copy")
+	highlighted := 0
+	for _, cell := range c.frame.Cells {
+		if cell.BG != colCopySelectionBG {
+			continue
+		}
+		highlighted++
+		if cell.Col >= 40 {
+			t.Fatalf("highlight leaked into the second pane at %d,%d", cell.Col, cell.Row)
+		}
 	}
-	if clip.Text != "hello" {
-		t.Fatalf("clipboard = %q, want %q", clip.Text, "hello")
+	if highlighted != 5 {
+		t.Fatalf("highlighted cells = %d, want 5 (\"hello\")", highlighted)
 	}
 }
 
-func TestSelectStartWhileKeyboardCopyModeOpenReanchors(t *testing.T) {
-	s, c, st := newCopyModeFixture(80, 24, linesOf(10, "row %02d"))
-	st.cursor = copyPoint{line: 9, col: 4}
-	st.anchor = st.cursor
-	s.handleSelectStart(c, 2, 1)
-	if !st.mouseOrigin {
-		t.Fatal("mouse origin flag not set on re-anchor")
+func TestMouseSelectionShowsFrozenSnapshot(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	writePaneText(t, s, 1, "first")
+
+	startMouseSelection(t, s, c, 0, 0)
+	// Output keeps arriving in the live pane; the selection view must not
+	// scroll out from under the highlight.
+	writePaneText(t, s, 1, "\r\nsecond")
+	s.broadcast()
+
+	if c.frame == nil {
+		t.Fatal("no frame after pane output")
 	}
-	want := copyPoint{line: st.top + 1, col: 2}
-	if st.anchor != want {
-		t.Fatalf("anchor = %+v, want %+v", st.anchor, want)
+	text := frameText(*c.frame)
+	if !strings.Contains(text, "first") {
+		t.Fatal("selection view lost the snapshotted text")
 	}
-	if st.cursor != want {
-		t.Fatalf("cursor = %+v, want %+v", st.cursor, want)
+	if strings.Contains(text, "second") {
+		t.Fatal("selection view showed live output instead of its snapshot")
 	}
-	if st.selKind != selectionChar {
-		t.Fatalf("selKind = %v, want selectionChar", st.selKind)
+}
+
+func TestCopyReturnsToTheLivePaneView(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	writePaneText(t, s, 1, "before")
+
+	startMouseSelection(t, s, c, 0, 0)
+	writePaneText(t, s, 1, "\r\nAFTER")
+	s.broadcast()
+
+	s.handleInput(c, []byte("\x1b[27;6;99~"))
+	if c.selection != nil {
+		t.Fatal("copy did not clear the selection")
+	}
+	if c.frame == nil {
+		t.Fatal("no frame after copy")
+	}
+	text := frameText(*c.frame)
+	if !strings.Contains(text, "AFTER") {
+		t.Fatal("live pane output did not return after copying")
+	}
+	if !c.frame.CursorVisible {
+		t.Fatal("live pane caret did not return after copying")
+	}
+}
+
+func TestMouseSelectionDoesNotBlockPaneActions(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	writePaneText(t, s, 1, "hello world")
+
+	startMouseSelection(t, s, c, 0, 0)
+	// A click on the other pane focuses it and drops the selection instead of
+	// being swallowed by a modal overlay.
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionFocus{X: 45, Y: 5}})
+	if c.selection != nil {
+		t.Fatal("focus click did not clear the selection")
+	}
+	if got := s.activeWindow().activePane; got != 2 {
+		t.Fatalf("active pane = %d, want 2", got)
+	}
+}
+
+func TestMouseSelectionDoesNotBlockDoubleClickZoom(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	startMouseSelection(t, s, c, 0, 0)
+
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionTogglePaneZoom{PaneID: 1}})
+	if c.selection != nil {
+		t.Fatal("double-click zoom did not clear the selection")
+	}
+	if !s.activeWindow().zoomed {
+		t.Fatal("double-click zoom was swallowed by the selection")
+	}
+}
+
+func TestMouseSelectionDoesNotBlockPrefixChords(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	startMouseSelection(t, s, c, 0, 0)
+
+	s.handleInput(c, []byte("\x01"))
+	s.handleInput(c, []byte("z"))
+
+	if c.selection != nil {
+		t.Fatal("prefix chord did not clear the selection")
+	}
+	if !s.activeWindow().zoomed {
+		t.Fatal("prefix chord was swallowed by the mouse selection")
+	}
+}
+
+func TestSelectionDroppedWhenLayoutChanges(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	startMouseSelection(t, s, c, 0, 0)
+
+	// Zoom is applied without a client message here, so the selection can only
+	// be dropped by the compositor's staleness check.
+	s.toggleZoom()
+
+	if c.selection != nil {
+		t.Fatal("selection survived a layout change")
+	}
+}
+
+func TestSelectActionsSwallowedWhileSettingsOpen(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	c.settingsOpen = true
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: 1, Y: 1}})
+	if c.selection != nil || c.copyMode != nil {
+		t.Fatal("selection start leaked through the settings modal")
+	}
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 2, Y: 2}})
+	if c.selection != nil || c.copyMode != nil {
+		t.Fatal("selection update leaked through the settings modal")
 	}
 }

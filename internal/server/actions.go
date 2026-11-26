@@ -24,6 +24,13 @@ const (
 // session-ending pane exit).
 func (s *Server) handleClientMessage(in clientMsg) bool {
 	c := in.cli
+	// A mouse selection is not modal: only the messages that extend it (drag
+	// updates, wheel steps, and the input that may carry the copy key) keep it
+	// alive. Anything else — focus, window switch, split, resize, detach —
+	// cancels the selection first and then runs normally.
+	if c.selection != nil && !selectionKeepsAlive(in.msg) {
+		s.clearSelection(c)
+	}
 	// A config recovery warning is modal: only lifecycle and input messages
 	// are handled. Everything else is swallowed rather than changing the
 	// session underneath the warning.
@@ -103,6 +110,8 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			s.relayout()
 			s.needFull = true
 			s.resizeCopyModes()
+			// Snapshotted selections no longer match the layout.
+			s.dropSelections()
 		}
 		s.broadcast()
 	case protocol.Detach:
@@ -474,6 +483,17 @@ func (s *Server) writeRaw(c *clientConn, data []byte) {
 }
 
 func (s *Server) handleInput(c *clientConn, data []byte) {
+	// A pending mouse selection intercepts exactly one key: the configured
+	// copy key. Every other key returns to the live pane first, so typing,
+	// prefix chords and detach all keep working while a selection is visible.
+	if c.selection != nil {
+		if s.sess != nil && string(data) == copyKeySequence(s.sess.opts()) {
+			c.clearRepeat()
+			s.copyMouseSelection(c)
+			return
+		}
+		s.clearSelection(c)
+	}
 	if c.copyMode != nil && c.copyMode.open {
 		c.clearRepeat()
 		s.handleCopyModeInput(c, data)

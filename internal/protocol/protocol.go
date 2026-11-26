@@ -145,8 +145,9 @@ type ActionWheel struct {
 
 // ActionSelectStart begins a mouse text selection anchored at cell (X, Y) in
 // screen coordinates. Sent when a drag crosses into a different cell than the
-// one the press started in. The server opens copy mode on the active pane and
-// starts a character-wise selection at the cell.
+// one the press started in. The server snapshots the pane under the pointer
+// into a non-modal selection view and starts a character-wise selection there;
+// no copy mode is opened and no other input is captured.
 type ActionSelectStart struct {
 	X, Y int
 }

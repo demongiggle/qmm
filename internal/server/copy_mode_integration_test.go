@@ -184,8 +184,8 @@ func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
 		}
 	}
 
-	// The default copy key (Ctrl-Shift-C) copies the selection and leaves
-	// copy mode, restoring the live pane.
+	// The default copy key (Ctrl-Shift-C) copies the selection and clears it,
+	// restoring the live pane view.
 	if err := c.codec.Send(protocol.Input{Data: []byte("\x1b[27;6;99~")}); err != nil {
 		t.Fatalf("copy key: %v", err)
 	}

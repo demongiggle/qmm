@@ -42,17 +42,18 @@ type copyPoint struct {
 
 // copyModeState is one attached client's view of a pane's scrollback. It is
 // deliberately per-client (like help and settings): the pane keeps running
-// for everyone else while this client browses and selects text.
+// for everyone else while this client browses and selects text. Mouse drags
+// do not open copy mode; they use the non-modal selectionState instead.
 type copyModeState struct {
 	open   bool
 	paneID int
-	// mouseOrigin is true when the copy view was entered by dragging with the
-	// mouse. It keeps the regular status bar (instead of the copy-mode hint
-	// line) and tells the wheel path it is extending a mouse selection.
-	mouseOrigin bool
-	lines       []copyLine
-	cols        int // host screen size, used for the overlay viewport
-	rows        int
+	// mouseDrag is true once a drag inside the copy view has re-anchored the
+	// selection, so select-update messages extend it instead of moving the
+	// keyboard cursor.
+	mouseDrag bool
+	lines     []copyLine
+	cols      int // host screen size, used for the overlay viewport
+	rows      int
 
 	top    int // first buffer line shown
 	cursor copyPoint
@@ -90,14 +91,19 @@ func (st *copyModeState) clampTop() {
 }
 
 func (st *copyModeState) lineLen(line int) int {
-	if line < 0 || line >= len(st.lines) {
+	return lineLenAt(st.lines, line)
+}
+
+// lineLenAt returns the cell count of a snapshot line, treating empty or
+// out-of-range lines as a single blank cell.
+func lineLenAt(lines []copyLine, line int) int {
+	if line < 0 || line >= len(lines) {
 		return 1
 	}
-	n := len(st.lines[line].cells)
-	if n < 1 {
-		return 1
+	if n := len(lines[line].cells); n > 0 {
+		return n
 	}
-	return n
+	return 1
 }
 
 func (st *copyModeState) clampCursor() {
@@ -303,7 +309,11 @@ func (st *copyModeState) startSelection(kind selectionKind) {
 
 // selectionBounds returns the ordered anchor/cursor pair.
 func (st *copyModeState) selectionBounds() (copyPoint, copyPoint) {
-	a, b := st.anchor, st.cursor
+	return orderedPoints(st.anchor, st.cursor)
+}
+
+// orderedPoints returns the two selection endpoints in reading order.
+func orderedPoints(a, b copyPoint) (copyPoint, copyPoint) {
 	if b.line < a.line || (b.line == a.line && b.col < a.col) {
 		return b, a
 	}
@@ -311,18 +321,24 @@ func (st *copyModeState) selectionBounds() (copyPoint, copyPoint) {
 }
 
 func (st *copyModeState) inSelection(line, col int) bool {
-	if st.selKind == selectionNone {
+	return pointSelected(st.selKind, st.anchor, st.cursor, line, col)
+}
+
+// pointSelected reports whether (line, col) falls inside the selection that
+// spans anchor..cursor. It is shared by copy mode and mouse selections.
+func pointSelected(kind selectionKind, anchor, cursor copyPoint, line, col int) bool {
+	if kind == selectionNone {
 		return false
 	}
-	a, b := st.selectionBounds()
+	a, b := orderedPoints(anchor, cursor)
 	if line < a.line || line > b.line {
 		return false
 	}
-	switch st.selKind {
+	switch kind {
 	case selectionLine:
 		return true
 	case selectionRect:
-		c0, c1 := st.anchor.col, st.cursor.col
+		c0, c1 := anchor.col, cursor.col
 		if c1 < c0 {
 			c0, c1 = c1, c0
 		}
@@ -348,19 +364,30 @@ func (st *copyModeState) selectedText() string {
 	if st.selKind == selectionNone {
 		return st.lines[clampInt(st.cursor.line, 0, len(st.lines)-1)].text()
 	}
-	a, b := st.selectionBounds()
-	if st.selKind == selectionLine {
+	return selectionText(st.lines, st.selKind, st.anchor, st.cursor)
+}
+
+// selectionText extracts the text covered by the selection. Line-wise and
+// rectangle selections extend to line ends and column bounds respectively.
+func selectionText(lines []copyLine, kind selectionKind, anchor, cursor copyPoint) string {
+	if len(lines) == 0 || kind == selectionNone {
+		return ""
+	}
+	a, b := orderedPoints(anchor, cursor)
+	a.line = clampInt(a.line, 0, len(lines)-1)
+	b.line = clampInt(b.line, 0, len(lines)-1)
+	if kind == selectionLine {
 		parts := make([]string, 0, b.line-a.line+1)
 		for line := a.line; line <= b.line; line++ {
-			parts = append(parts, st.lines[line].text())
+			parts = append(parts, lines[line].text())
 		}
 		return strings.Join(parts, "\n")
 	}
 	var parts []string
 	for line := a.line; line <= b.line; line++ {
-		cells := st.lines[line].cells
+		cells := lines[line].cells
 		lo, hi := 0, len(cells)-1
-		switch st.selKind {
+		switch kind {
 		case selectionChar:
 			if line == a.line {
 				lo = a.col
@@ -369,7 +396,7 @@ func (st *copyModeState) selectedText() string {
 				hi = b.col
 			}
 		case selectionRect:
-			c0, c1 := st.anchor.col, st.cursor.col
+			c0, c1 := anchor.col, cursor.col
 			if c1 < c0 {
 				c0, c1 = c1, c0
 			}
@@ -490,37 +517,6 @@ func (st *copyModeState) scrToBuffer(x, y int) copyPoint {
 	return copyPoint{line: line, col: clampInt(x, 0, maxCol)}
 }
 
-// handleSelectStart anchors a mouse drag selection. If copy mode is not open
-// yet (live pane), it opens it on the active pane first; the view therefore
-// starts at the bottom of the buffer and the visible screen lines map 1:1.
-func (s *Server) handleSelectStart(c *clientConn, x, y int) {
-	if c.copyMode == nil || !c.copyMode.open {
-		s.openCopyMode(c, 0)
-	}
-	st := c.copyMode
-	if st == nil || !st.open {
-		return
-	}
-	st.mouseOrigin = true
-	st.selKind = selectionChar
-	st.searchActive = false
-	p := st.scrToBuffer(x, y)
-	st.anchor, st.cursor = p, p
-	st.clearCount()
-	c.forceFull = true
-	s.broadcast()
-}
-
-func (s *Server) handleSelectUpdate(c *clientConn, x, y int) {
-	st := c.copyMode
-	if st == nil || !st.open || !st.mouseOrigin {
-		return
-	}
-	st.cursor = st.scrToBuffer(x, y)
-	c.forceFull = true
-	s.broadcast()
-}
-
 func (s *Server) resizeCopyModes() {
 	for c := range s.clients {
 		st := c.copyMode
@@ -537,6 +533,12 @@ func (s *Server) resizeCopyModes() {
 // copy mode (tmux behavior); wheel-down at the bottom of the buffer closes it.
 func (s *Server) handleWheel(c *clientConn, delta int) {
 	if delta == 0 {
+		return
+	}
+	// A pending mouse selection owns the wheel: it extends the selection into
+	// the frozen snapshot instead of scrolling the live pane.
+	if c.selection != nil {
+		s.wheelSelection(c, delta)
 		return
 	}
 	st := c.copyMode
@@ -566,12 +568,20 @@ func (s *Server) copySelection(c *clientConn) {
 	if st == nil || !st.open {
 		return
 	}
-	text := clampClipboardText(st.selectedText(), clipboardLimit)
-	if text != "" {
-		s.pasteBuffer = text
-		c.enqueue(protocol.Clipboard{Text: text})
-	}
+	s.deliverClipboard(c, st.selectedText())
 	s.closeCopyMode(c)
+}
+
+// deliverClipboard hands text to the host clipboard (OSC 52) and to qmm's
+// paste buffer. Empty text is dropped so a stray copy key does not wipe the
+// buffer.
+func (s *Server) deliverClipboard(c *clientConn, text string) {
+	text = clampClipboardText(text, clipboardLimit)
+	if text == "" {
+		return
+	}
+	s.pasteBuffer = text
+	c.enqueue(protocol.Clipboard{Text: text})
 }
 
 // clampClipboardText caps a selection at limit bytes without cutting a
@@ -793,7 +803,38 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 // overlay rendering
 // ---------------------------------------------------------------------------
 
-func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, cols, rows int, st *copyModeState, s *session, opts *settingsState) {
+// blitSnapshotLine writes one scrollback line into a screen row starting at
+// column x0. hl may be nil; when it reports a hit, the cell is drawn with the
+// returned style (copy mode uses this for the selection and cursor).
+func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl func(col int) (fg, bg int32, style uint8, ok bool)) {
+	skip := 0
+	for x := 0; x < width; x++ {
+		cell := blankCopyCell()
+		if x < len(line.cells) {
+			cell = line.cells[x]
+		}
+		ch := cell.Ch
+		if ch == 0 {
+			ch = ' '
+		}
+		if skip > 0 {
+			ch = ' '
+			skip--
+		}
+		fg, bg, style := cell.FG, cell.BG, cell.Style
+		if hl != nil {
+			if hfg, hbg, hstyle, ok := hl(x); ok {
+				fg, bg, style = hfg, hbg, hstyle
+			}
+		}
+		if skip == 0 && uniseg.StringWidth(string(ch)) == 2 {
+			skip = 1
+		}
+		setCell(x0+x, y, ch, fg, bg, style)
+	}
+}
+
+func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, cols, rows int, st *copyModeState) {
 	frame.Panes = nil
 	frame.Splitters = nil
 	frame.Tabs = nil
@@ -806,42 +847,23 @@ func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, co
 	}
 	for y := 0; y < viewRows && y < rows; y++ {
 		idx := st.top + y
-		skip := 0
-		for x := 0; x < cols; x++ {
-			cell := blankCopyCell()
-			if idx >= 0 && idx < len(st.lines) && x < len(st.lines[idx].cells) {
-				cell = st.lines[idx].cells[x]
-			}
-			ch := cell.Ch
-			if ch == 0 {
-				ch = ' '
-			}
-			if skip > 0 {
-				ch = ' '
-				skip--
-			}
-			fg, bg, style := cell.FG, cell.BG, cell.Style
-			if st.inSelection(idx, x) {
-				fg, bg, style = colCopySelectionFG, colCopySelectionBG, 0
-			}
-			if idx == st.cursor.line && x == st.cursor.col {
-				fg, bg, style = colCopyCursorFG, colCopyCursorBG, protocol.StyleBold
-			}
-			if skip == 0 && uniseg.StringWidth(string(ch)) == 2 {
-				skip = 1
-			}
-			setCell(x, y, ch, fg, bg, style)
+		line := copyLine{}
+		if idx >= 0 && idx < len(st.lines) {
+			line = st.lines[idx]
 		}
+		blitSnapshotLine(setCell, line, 0, y, cols, func(col int) (int32, int32, uint8, bool) {
+			if st.inSelection(idx, col) {
+				return colCopySelectionFG, colCopySelectionBG, 0, true
+			}
+			if idx == st.cursor.line && col == st.cursor.col {
+				return colCopyCursorFG, colCopyCursorBG, protocol.StyleBold, true
+			}
+			return 0, 0, 0, false
+		})
 	}
 
 	statusY := rows - 1
 	if statusY < 0 {
-		return
-	}
-	if st.mouseOrigin {
-		// Mouse drag-selection keeps the regular status bar so the window
-		// tabs stay visible while the selection is active.
-		c.drawStatusBar(frame, setCell, s, opts, cols, rows)
 		return
 	}
 	for x := 0; x < cols; x++ {

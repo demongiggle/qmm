@@ -58,7 +58,7 @@ status bar), toggle back with `Ctrl-a` `z` again, open a new window with
 | **Navigation without a detour** | `Ctrl-a` `o` cycles panes, `Ctrl-a` `q` overlays large pane numbers for instant jumps, and `Ctrl-a` `Ctrl-a` sends a literal Ctrl-a to the application. |
 | **Mouse-ready, keyboard-complete** | Click to focus, double-click to zoom, click a status-bar tab to switch windows, or drag a divider to resize. Every core action also has a keyboard path. |
 | **Focus without losing the big picture** | Floating zoom lifts the active pane above the split layout, centered with at least a 2% margin. Toggle it again and the original layout returns. |
-| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback, or drag with the mouse to select directly; copy with `Ctrl-Shift-C` (configurable) or `y` to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
+| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback, or drag with the mouse to select a pane's text directly without leaving the live view; copy with `Ctrl-Shift-C` (configurable) to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
 | **Terminal color that stays true** | Pane output preserves ANSI 16-color, 256-color, and 24-bit RGB styling, while active borders, window tabs, and help are color-coded for quick orientation. |
 | **Guidance, tuning, and a safety net** | Categorized help, a scrollable settings page, and an optional y/n confirmation before shutdown keep powerful actions discoverable and deliberate. |
 | **One view, multiple terminals** | Multiple clients can attach to the same session. Like tmux, the effective terminal size follows the smallest attached client. |
@@ -251,17 +251,15 @@ client.
 `Ctrl-a` `[` opens copy mode, a full-screen view of the active pane's
 scrollback (2,000 lines per pane) plus its current screen. Movement is
 vim-style, and the overlay belongs only to the attached client that opened it —
-other clients keep using the pane as usual. Dragging over text with the mouse
-selects it directly, without leaving the live view first: qmm snapshots the
-scrollback into a copy-mode view with the selection anchored where you pressed
-the button. The status bar stays in place while a mouse selection is active.
-Press the configured copy key (`Ctrl-Shift-C` by default; see
-[settings](#help-and-settings-right-where-you-work)) to copy the selection and
-return to the live pane; `y`, `Enter`, or `Ctrl-c` (with an active selection)
-work too. While the selection is
-active, the mouse wheel scrolls the snapshot and extends the selection into
-scrollback. The selection highlight stays visible until you copy or leave
-copy mode (`Esc`, `q`).
+other clients keep using the pane as usual. Copy mode is modal: keys drive the
+view, and `Esc`, `q`, or `Ctrl-c` (with no selection) leave it. Copy the
+selection with the configured copy key (`Ctrl-Shift-C` by default; see
+[settings](#help-and-settings-right-where-you-work)), or with `y` or `Enter`;
+`Ctrl-c` copies while a `v`/`V`/`Ctrl-v` selection is active.
+
+Dragging over text with the mouse selects it without entering copy mode; see
+[Mouse shortcuts](#mouse-shortcuts). The selection highlight stays visible
+until you copy it or click elsewhere.
 
 | Key | Action |
 | :--- | :--- |
@@ -282,9 +280,9 @@ The copy key is configured in the **Copy mode** settings section (or as
 (default), `Ctrl-Shift-X`, `Ctrl-Y`, or `Ctrl-Insert`. Note that many
 terminals grab `Ctrl-Shift-C`/`Ctrl-Insert` for their own clipboard and never
 forward them; if copies seem to do nothing, use `y`, `Enter`, or `Ctrl-c`
-with an active selection, or switch to `Ctrl-Y`. The selection is a character-wise snapshot: text is captured
-as of the moment the drag started, so output that scrolls in afterwards is
-not part of the selection.
+with an active keyboard selection, or switch to `Ctrl-Y` — a mouse selection
+copies with the configured key only, since every other key belongs to the
+pane.
 
 Motions accept a numeric prefix (`10j`, `3w`), and the view follows the
 cursor. `y` with no active selection copies the current line. Copied text goes
@@ -312,17 +310,21 @@ If help, settings, or pane numbers are open, a wheel event dismisses that
 overlay instead.
 
 Drag across text in a pane to select it. The moment the pointer leaves the
-cell it started in, qmm opens a copy-mode view of that pane's scrollback with
-a character-wise selection anchored at the press point; the selection
-highlight stays visible after you release the button. Scrolling the wheel
-with a selection active extends it into (or back out of) the scrollback.
-Pressing the configured copy key — `Ctrl-Shift-C` by default — copies the
-selection to the host clipboard and qmm's paste buffer and returns to the
-live pane, where `Ctrl-a` `]` pastes it. `y`, `Enter`, or `Ctrl-c` with the
-mouse selection active copy too; `Esc` or `q` cancels without copying.
-Plain clicks (no drag) behave as before: click to focus, double-click to zoom.
-While a selection is open the mouse is otherwise captured by the selection, so
-window-switch clicks are ignored until you copy or cancel.
+cell it started in, qmm draws a character-wise selection over a frozen
+snapshot of that pane, so the highlight stays put while output keeps arriving.
+The selection is not a mode: it never takes the keyboard and never blocks other
+actions. Press the configured copy key — `Ctrl-Shift-C` by default — to copy
+the selection to the host clipboard and qmm's paste buffer and return to the
+live pane, where `Ctrl-a` `]` pastes it. `y`, `Enter`, `Esc`, and `Ctrl-c` are
+ordinary keys here and go to the shell, just like everything else. Scrolling
+the wheel with a selection active extends it into (or back out of) the
+scrollback; wheel-down on the newest line ends it.
+
+Any other input ends the selection and then does what it normally does: typing
+returns to the shell, clicking another pane focuses it, clicking a status-bar
+tab switches windows, double-clicking zooms, and prefix chords such as
+`Ctrl-a` `[` or `Ctrl-a` `d` still work. Plain clicks (no drag) behave as
+before: click to focus, double-click to zoom.
 
 ### Deliberate shutdown
 

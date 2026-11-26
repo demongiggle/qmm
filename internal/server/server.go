@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
@@ -115,6 +116,10 @@ type clientConn struct {
 	// prefix+[ opens copy mode: a per-client, vim-keyed view of the active
 	// pane's scrollback with an optional selection.
 	copyMode *copyModeState
+
+	// selection is a mouse drag selection. It is not copy mode: it never
+	// captures the keyboard and never blocks other mouse actions.
+	selection *selectionState
 
 	// Config recovery warnings are local. A startup warning is shown once to
 	// the first attached client; runtime failures target their triggering
@@ -449,7 +454,20 @@ func (s *Server) scheduleRender() {
 func (s *Server) broadcast() {
 	forceFull := s.needFull
 	s.needFull = false
+	// A selection pins the pane viewport it was started on. If the layout
+	// moved the pane (split, zoom, window switch, pane exit), the snapshot is
+	// stale: drop it rather than draw it over the wrong rectangle.
+	var rects map[int]layout.Rect
 	for c := range s.clients {
+		if sel := c.selection; sel != nil {
+			if rects == nil {
+				rects = s.paneRects()
+			}
+			if r, ok := rects[sel.paneID]; !ok || r != sel.rect || s.sess.panes[sel.paneID] == nil {
+				c.selection = nil
+				c.forceFull = true
+			}
+		}
 		c.comp.helpOpen = c.helpOpen
 		c.comp.helpTop = c.helpTop
 		c.comp.confirmOpen = c.confirmOpen
@@ -461,6 +479,7 @@ func (s *Server) broadcast() {
 		c.comp.settingsCursor = c.settingsCursor
 		c.comp.settingsTop = c.settingsTop
 		c.comp.copyMode = c.copyMode
+		c.comp.selection = c.selection
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
 		c.forceFull = false
 		c.helpTop = c.comp.helpTop

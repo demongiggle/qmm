@@ -73,6 +73,10 @@ type compositor struct {
 	settingsTop    int
 
 	copyMode *copyModeState
+
+	// selection is a mouse drag selection: a frozen snapshot of one pane that
+	// is drawn in place while the rest of the layout stays live.
+	selection *selectionState
 }
 
 func blankCell(row, col int) protocol.Cell {
@@ -109,7 +113,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	}
 	render := func() protocol.Frame {
 		if c.copyMode != nil && c.copyMode.open {
-			c.drawCopyMode(&frame, setCell, cols, rows, c.copyMode, s, opts)
+			c.drawCopyMode(&frame, setCell, cols, rows, c.copyMode)
 		} else if c.configWarningOpen {
 			c.drawConfigWarning(&frame, setCell, cols, rows, c.configWarning)
 		} else if c.confirmOpen {
@@ -165,7 +169,14 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			if p == nil {
 				continue
 			}
-			blitPane(setCell, p, r)
+			// A mouse selection shows a frozen snapshot of its pane, so the
+			// highlight cannot drift while output keeps arriving. Everything
+			// else on screen stays live.
+			if sel := c.selection; sel != nil && sel.paneID == id && sel.rect == r {
+				c.drawSelection(setCell, sel, r)
+			} else {
+				blitPane(setCell, p, r)
+			}
 			if id == w.activePane {
 				activeRect, haveActive = r, true
 			}
@@ -238,7 +249,11 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				}
 				p := s.panes[w.activePane]
 				if p != nil {
-					blitPane(setCell, p, inner)
+					if sel := c.selection; sel != nil && sel.paneID == p.id && sel.rect == inner {
+						c.drawSelection(setCell, sel, inner)
+					} else {
+						blitPane(setCell, p, inner)
+					}
 					cur := p.vtCursor()
 					frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
 					frame.CursorVisible = cur.visible
@@ -265,14 +280,19 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		}
 	}
 
+	if c.selection != nil {
+		// The selected pane shows a frozen snapshot: no live caret.
+		frame.CursorVisible = false
+	}
+
 	c.drawStatusBar(&frame, setCell, s, opts, cols, rows)
 
 	return render()
 }
 
 // drawStatusBar renders the bottom status bar (window tabs, optional clock)
-// and records the tab hit zones in frame.Tabs. It is used both for the live
-// view and for mouse-origin selection views, so the bar stays identical.
+// and records the tab hit zones in frame.Tabs. It is used for the live view, so
+// a pending mouse selection keeps the same bar and tab hit zones.
 func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int, ch rune, fg, bg int32, style uint8), s *session, opts *settingsState, cols, rows int) {
 	sbY := rows - 1
 	showClock := opts.showClock()
