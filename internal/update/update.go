@@ -181,7 +181,8 @@ func parseArgs(arguments []string, stderr io.Writer) (updateArgs, error) {
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: qmm update [--arch architecture] [--pre]")
 		fmt.Fprintln(stderr, "\nDownload and install the latest qmm release for the current operating system.")
-		fmt.Fprintln(stderr, "Supported architectures: amd64 and arm64; FreeBSD only supports amd64.")
+		fmt.Fprintln(stderr, "Supported architectures: amd64 and arm64 (aliases: x86_64, aarch64); FreeBSD only supports amd64.")
+		fmt.Fprintln(stderr, "--arch also accepts os_arch, such as linux_arm64; the OS must match the host.")
 		fmt.Fprintln(stderr, "Without --pre only stable releases are considered; --pre also considers pre-releases.")
 	}
 	if err := flags.Parse(arguments); err != nil {

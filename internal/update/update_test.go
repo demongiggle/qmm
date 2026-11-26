@@ -118,8 +118,10 @@ func TestParseArgs(t *testing.T) {
 	if _, err := parseArgs([]string{"--help"}, &usage); !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("help error = %v, want flag.ErrHelp", err)
 	}
-	if !strings.Contains(usage.String(), "qmm update") || !strings.Contains(usage.String(), "--pre") {
-		t.Fatalf("usage = %q", usage.String())
+	for _, wanted := range []string{"qmm update", "--pre", "x86_64", "aarch64", "os_arch"} {
+		if !strings.Contains(usage.String(), wanted) {
+			t.Fatalf("usage missing %q: %q", wanted, usage.String())
+		}
 	}
 }
 
