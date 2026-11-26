@@ -18,7 +18,7 @@ const (
 	DirRight
 )
 
-// Software caret shapes. Zero is the steady block default for frames created
+// Native cursor shapes. Zero is the steady block default for frames created
 // by older callers or tests that omit the cursor style fields.
 const (
 	CursorShapeBlock uint8 = iota

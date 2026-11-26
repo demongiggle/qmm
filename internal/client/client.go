@@ -48,8 +48,8 @@ func Attach(socketPath string) error {
 		return fmt.Errorf("qmm: init screen: %w", err)
 	}
 	screen.EnableMouse()
-	// The caret is a software-rendered cell; hiding the host cursor keeps
-	// tcell's per-redraw cursor handling from affecting its blink rate.
+	// Hide the host cursor until the first frame supplies a pane cursor
+	// position. applyFrame and blinkCaret own its shape and visibility.
 	screen.HideCursor()
 	// Note: no EnablePaste. Pasted bytes arrive as ordinary key input and are
 	// forwarded to the pane, matching how tcell delivers them unencoded.

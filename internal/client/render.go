@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/uniseg"
 
 	"github.com/demongiggle/qmm/internal/protocol"
 )
@@ -12,14 +11,11 @@ import (
 const (
 	doubleClickInterval = 500 * time.Millisecond
 	doubleClickSlop     = 2
-	// caretBlinkInterval is the half-cycle of the client-owned software
-	// caret. It is deliberately independent of pane output and frame rate.
+	// caretBlinkInterval is the half-cycle of the client-owned cursor
+	// visibility toggle, independent of pane output and frame rate. The
+	// native cursor uses steady shapes so tcell's per-redraw hide/show
+	// cannot reset a terminal-controlled blink phase.
 	caretBlinkInterval = 500 * time.Millisecond
-
-	// caretBarOverlay is a combining vertical stroke that preserves the
-	// underlying glyph. Terminals that cannot display it use caretBarFallback.
-	caretBarOverlay  = '\u20d2'
-	caretBarFallback = '▏'
 )
 
 // paneClick records a completed or pending click on a pane hit target.
@@ -40,8 +36,9 @@ type attach struct {
 
 	frame protocol.Frame // last frame, for mouse hit-testing
 
-	// grid holds the unadorned server frame. The caret is painted over it
-	// locally, so the host terminal's hardware cursor is never used.
+	// grid holds the unadorned server frame. It bounds cell updates and
+	// detects stale screens; the caret is the host terminal's native cursor,
+	// positioned locally over the grid.
 	grid          []protocol.Cell
 	gridCols      int
 	gridRows      int
@@ -50,10 +47,7 @@ type attach struct {
 	caretVisible  bool
 	caretShape    uint8
 	caretBlink    bool
-	caretBlinkOff bool // zero value means the software caret is lit
-	caretDrawn    bool
-	drawnCaretX   int
-	drawnCaretY   int
+	caretBlinkOff bool // zero value means the native cursor is shown
 
 	dragging     bool
 	dragID       int
@@ -112,10 +106,6 @@ func cellRune(ch rune) rune {
 	return ch
 }
 
-func wideCell(ch rune) bool {
-	return uniseg.StringWidth(string(cellRune(ch))) == 2
-}
-
 func (a *attach) resetGrid(cols, rows int) {
 	a.gridCols, a.gridRows = cols, rows
 	a.grid = make([]protocol.Cell, cols*rows)
@@ -124,7 +114,6 @@ func (a *attach) resetGrid(cols, rows int) {
 			a.grid[y*cols+x] = blankClientCell(y, x)
 		}
 	}
-	a.caretDrawn = false
 }
 
 // ensureGrid rebuilds the local copy after a full frame or a size change.
@@ -134,7 +123,6 @@ func (a *attach) ensureGrid(f protocol.Frame) bool {
 	cols, rows := a.frameCols, a.frameRows
 	if cols <= 0 || rows <= 0 {
 		a.grid, a.gridCols, a.gridRows = nil, 0, 0
-		a.caretDrawn = false
 		return false
 	}
 	if !f.Full && a.gridCols == cols && a.gridRows == rows && len(a.grid) == cols*rows {
@@ -148,100 +136,48 @@ func (a *attach) inGrid(x, y int) bool {
 	return x >= 0 && y >= 0 && x < a.gridCols && y < a.gridRows
 }
 
-func (a *attach) setScreenCellStyled(c protocol.Cell, combining []rune, style tcell.Style) {
+func (a *attach) setScreenCell(c protocol.Cell) {
 	if !a.inGrid(c.Col, c.Row) {
 		return
 	}
-	a.screen.SetContent(c.Col, c.Row, cellRune(c.Ch), combining, style)
+	a.screen.SetContent(c.Col, c.Row, cellRune(c.Ch), nil, styleOf(c))
 }
 
-func (a *attach) setScreenCell(c protocol.Cell) {
-	a.setScreenCellStyled(c, nil, styleOf(c))
-}
-
-// paintCell restores one unadorned cell, including the trailing cell that
-// tcell may reserve when the rune is double-width.
-func (a *attach) paintCell(x, y int) {
-	if !a.inGrid(x, y) {
-		return
-	}
-	c := a.grid[y*a.gridCols+x]
-	c.Row, c.Col = y, x
-	a.setScreenCell(c)
-	if wideCell(c.Ch) && x+1 < a.gridCols {
-		next := a.grid[y*a.gridCols+x+1]
-		next.Row, next.Col = y, x+1
-		a.setScreenCell(next)
-	}
-}
-
-func (a *attach) clearCaret() {
-	if !a.caretDrawn {
-		return
-	}
-	a.paintCell(a.drawnCaretX, a.drawnCaretY)
-	a.caretDrawn = false
-}
-
-func (a *attach) drawCaret() {
-	if a.caretDrawn || !a.caretVisible || (a.caretBlink && a.caretBlinkOff) {
-		return
-	}
-	x, y := a.caretX, a.caretY
-	if !a.inGrid(x, y) {
-		return
-	}
-	c := a.grid[y*a.gridCols+x]
-	c.Row, c.Col = y, x
-	// Clearing text blink keeps the caret's on phase steady; the underlying
-	// cell regains blink on the off phase.
-	c.Style &^= protocol.StyleBlink
-	switch a.caretShape {
+// nativeCursorShape maps the shared cursor-shape setting to a steady
+// DECSCUSR style. Blink is owned by qmm's visibility ticker: using a
+// terminal-controlled blinking style would let tcell's per-redraw
+// hide/show restart the terminal's blink phase on every frame.
+func nativeCursorShape(shape uint8) tcell.CursorStyle {
+	switch shape {
 	case protocol.CursorShapeUnderline:
-		style := styleOf(c)
-		if c.Style&protocol.StyleUnderline != 0 {
-			style = style.Underline(tcell.UnderlineStyleDouble)
-		} else {
-			style = style.Underline(tcell.UnderlineStyleSolid)
-		}
-		a.setScreenCellStyled(c, nil, style)
+		return tcell.CursorStyleSteadyUnderline
 	case protocol.CursorShapeBar:
-		if a.screen.CanDisplay(caretBarOverlay, false) {
-			a.setScreenCellStyled(c, []rune{caretBarOverlay}, styleOf(c))
-		} else {
-			fallback := c
-			fallback.Ch = caretBarFallback
-			fallback.Style ^= protocol.StyleReverse
-			a.setScreenCell(fallback)
-		}
-	default: // CursorShapeBlock
-		// Invert the cell's displayed colors regardless of whether the pane
-		// already marked it reverse-video.
-		c.Style ^= protocol.StyleReverse
-		a.setScreenCell(c)
+		return tcell.CursorStyleSteadyBar
+	default: // protocol.CursorShapeBlock
+		return tcell.CursorStyleSteadyBlock
 	}
-	if wideCell(c.Ch) && x+1 < a.gridCols {
-		next := a.grid[y*a.gridCols+x+1]
-		next.Row, next.Col = y, x+1
-		a.setScreenCell(next)
-	}
-	a.caretDrawn = true
-	a.drawnCaretX, a.drawnCaretY = x, y
 }
 
-func (a *attach) refreshCaret() {
-	a.clearCaret()
-	a.drawCaret()
+// syncCursor applies the native cursor's shape and visibility. It runs
+// before screen.Show(), which flushes cursor state as part of its redraw.
+func (a *attach) syncCursor() {
+	a.screen.SetCursorStyle(nativeCursorShape(a.caretShape))
+	if a.caretVisible && (!a.caretBlink || !a.caretBlinkOff) && a.inGrid(a.caretX, a.caretY) {
+		a.screen.ShowCursor(a.caretX, a.caretY)
+		return
+	}
+	a.screen.HideCursor()
 }
 
-// blinkCaret advances the software caret's fixed-rate phase. A steady caret
-// never requests a repaint, and hidden cursors never advance the phase.
+// blinkCaret advances the native cursor's fixed-rate visibility phase.
+// A steady cursor never requests a repaint, and hidden cursors never
+// advance the phase.
 func (a *attach) blinkCaret() bool {
 	if !a.caretBlink || !a.caretVisible {
 		return false
 	}
 	a.caretBlinkOff = !a.caretBlinkOff
-	a.refreshCaret()
+	a.syncCursor()
 	return true
 }
 
@@ -249,9 +185,6 @@ func (a *attach) applyFrame(f protocol.Frame) {
 	if f.Cols > 0 && f.Rows > 0 {
 		a.frameCols, a.frameRows = f.Cols, f.Rows
 	}
-	// Keep the host cursor hidden. tcell hides and restores the cursor on
-	// every Show(), which would otherwise make its blink follow frame rate.
-	a.screen.HideCursor()
 	cleared := false
 	if f.Full {
 		a.screen.Clear()
@@ -269,18 +202,17 @@ func (a *attach) applyFrame(f protocol.Frame) {
 	}
 	wasVisible := a.caretVisible
 	styleChanged := a.caretShape != f.CursorShape || a.caretBlink != f.CursorBlink
-	a.clearCaret()
 	a.caretVisible = f.CursorVisible
 	a.caretX, a.caretY = f.CursorX, f.CursorY
 	a.caretShape = f.CursorShape
 	a.caretBlink = f.CursorBlink
 	// Style changes, a steady caret, and a cursor returning from an
-	// application-hidden state all start on the lit phase. Ordinary output
+	// application-hidden state all start on the shown phase. Ordinary output
 	// frames leave a blinking caret's phase untouched.
 	if styleChanged || (!wasVisible && a.caretVisible) || !a.caretBlink {
 		a.caretBlinkOff = false
 	}
-	a.drawCaret()
+	a.syncCursor()
 	a.frame = f
 }
 

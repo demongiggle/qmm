@@ -148,9 +148,12 @@ Tune nine values: the status clock, active border color, cursor shape
 (`Block`, `Underline`, or `Bar`), cursor blink, pane-number timeout,
 double-click zoom, keyboard resize step, automatic window names, and shutdown
 confirmation. The default caret is a steady block; turn **Cursor blink** on for
-the 500 ms blink cycle. **Bar** is a best-effort combining overlay that keeps
-the underlying pane text visible. Applications still control cursor visibility;
-DECSCUSR style requests are ignored.
+the 500 ms blink cycle. **Cursor shape** uses the host terminal's native
+DECSCUSR caret — steady block, underline, or bar — so the underlying pane text
+stays visible. qmm toggles that caret's visibility for blinking, keeping its
+rate independent of pane output and frame rate. Applications still control
+cursor visibility; their own DECSCUSR style requests are ignored. Terminals
+without DECSCUSR fall back to their default cursor shape.
 
 Values are shared by all attached clients for the server's lifetime and are
 saved immediately to `$XDG_CONFIG_HOME/qmm/config.toml` (or
@@ -247,7 +250,7 @@ QMM_SOCKET_DIR=$(mktemp -d) script -qec ./qmm /tmp/qmm.log
 - [ ] type in a pane, `Ctrl-a d` detaches, `qmm attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
 - [ ] `Ctrl-a s` opens categorized settings; arrows scroll, `←` / `→` changes a value, and `r` / `Ctrl-r` reloads the config
-- [ ] settings page shows **Cursor shape** and **Cursor blink**; Block / Underline / Bar and blink On / Off change the software caret
+- [ ] settings page shows **Cursor shape** and **Cursor blink**; Block / Underline / Bar and blink On / Off change the host terminal's native cursor
 - [ ] settings changes survive a server restart; external TOML edits take effect after `r` / `Ctrl-r` and update all attached clients
 - [ ] a broken config file produces a timestamped `.bak`, a fresh default, a first-client warning dialog, and a `server.log` entry
 - [ ] `Ctrl-a &` opens shutdown confirmation; `n` / `Esc` cancels; `y` ends the server

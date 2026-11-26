@@ -83,7 +83,7 @@ func TestApplyFrameRendersPaletteAndRGBColors(t *testing.T) {
 	}
 }
 
-func TestApplyFrameDrawsSoftwareCaret(t *testing.T) {
+func TestApplyFrameShowsNativeCursorWithoutRecoloringCells(t *testing.T) {
 	screen := newCaretScreen(t, 2, 1)
 	a := &attach{screen: screen}
 	base := []protocol.Cell{
@@ -97,17 +97,12 @@ func TestApplyFrameDrawsSoftwareCaret(t *testing.T) {
 	})
 	screen.Show()
 
-	if got, want := screenStyleAt(t, screen, 0, 0), styleOf(base[0]); got != want {
-		t.Errorf("cell without caret style = %#v, want %#v", got, want)
+	for i, want := range []tcell.Style{styleOf(base[0]), styleOf(base[1])} {
+		if got := screenStyleAt(t, screen, i, 0); got != want {
+			t.Errorf("cell %d style = %#v, want untouched %#v", i, got, want)
+		}
 	}
-	caretCell := base[1]
-	caretCell.Style |= protocol.StyleReverse
-	if got, want := screenStyleAt(t, screen, 1, 0), styleOf(caretCell); got != want {
-		t.Errorf("caret style = %#v, want %#v", got, want)
-	}
-	if _, _, visible := screen.GetCursor(); visible {
-		t.Error("hardware cursor is visible; caret should be software-rendered")
-	}
+	assertNativeCursor(t, screen, 1, 0, true)
 }
 
 func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
@@ -118,19 +113,13 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 		{Row: 0, Col: 1, Ch: 'B', FG: 46, BG: 236, Style: protocol.StyleUnderline},
 		{Row: 0, Col: 2, Ch: 'C', FG: 46, BG: 236},
 	}
-	caretCell := base[1]
-	caretCell.Style |= protocol.StyleReverse
-	caretOn := styleOf(caretCell)
-	caretOff := styleOf(base[1])
 
 	a.applyFrame(protocol.Frame{
 		Full: true, Cols: 3, Rows: 1, Cells: base,
 		CursorX: 1, CursorY: 0, CursorVisible: true, CursorBlink: true,
 	})
 	screen.Show()
-	if got := screenStyleAt(t, screen, 1, 0); got != caretOn {
-		t.Fatalf("initial caret style = %#v, want %#v", got, caretOn)
-	}
+	assertNativeCursor(t, screen, 1, 0, true)
 
 	// A burst of output frames must not change the caret phase.
 	for i := 0; i < 20; i++ {
@@ -144,20 +133,16 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 		if a.caretBlinkOff {
 			t.Fatalf("output frame %d advanced the caret blink phase", i)
 		}
-		if got := screenStyleAt(t, screen, 1, 0); got != caretOn {
-			t.Fatalf("caret on frame %d style = %#v, want %#v", i, got, caretOn)
-		}
+		assertNativeCursor(t, screen, 1, 0, true)
 	}
 
 	if !a.blinkCaret() {
 		t.Fatal("blinkCaret did not report a visible caret repaint")
 	}
 	screen.Show()
-	if got := screenStyleAt(t, screen, 1, 0); got != caretOff {
-		t.Errorf("blinked-off caret style = %#v, want %#v", got, caretOff)
-	}
+	assertNativeCursor(t, screen, 1, 0, false)
 
-	// Output while the phase is off must not turn the caret back on.
+	// Output while the phase is off must not show the cursor again.
 	for i := 0; i < 5; i++ {
 		a.applyFrame(protocol.Frame{
 			Cols: 3, Rows: 1,
@@ -165,32 +150,26 @@ func TestCaretBlinkIsIndependentOfFrameRate(t *testing.T) {
 			CursorX: 1, CursorY: 0, CursorVisible: true, CursorBlink: true,
 		})
 		screen.Show()
-		if got := screenStyleAt(t, screen, 1, 0); got != caretOff {
-			t.Fatalf("caret off phase changed on output frame %d: %#v", i, got)
-		}
+		assertNativeCursor(t, screen, 1, 0, false)
 	}
 
 	a.blinkCaret()
 	screen.Show()
-	if got := screenStyleAt(t, screen, 1, 0); got != caretOn {
-		t.Errorf("blinked-on caret style = %#v, want %#v", got, caretOn)
-	}
+	assertNativeCursor(t, screen, 1, 0, true)
 
-	// An application-hidden cursor removes the software caret entirely.
+	// An application-hidden cursor removes the native caret entirely.
 	a.applyFrame(protocol.Frame{Cols: 3, Rows: 1, CursorVisible: false, CursorBlink: true})
 	screen.Show()
-	if got := screenStyleAt(t, screen, 1, 0); got != caretOff {
-		t.Errorf("hidden caret style = %#v, want %#v", got, caretOff)
-	}
+	assertNativeCursor(t, screen, 1, 0, false)
 	if a.blinkCaret() {
 		t.Error("hidden caret should not request a blink repaint")
 	}
-	if _, _, visible := screen.GetCursor(); visible {
-		t.Error("hardware cursor became visible")
+	if got := screenStyleAt(t, screen, 1, 0); got != styleOf(base[1]) {
+		t.Errorf("caret cell style = %#v, want untouched %#v", got, styleOf(base[1]))
 	}
 }
 
-func TestCaretMoveRestoresUnderlyingCellAndInvertsReverse(t *testing.T) {
+func TestCaretMoveKeepsCellsAndMovesNativeCursor(t *testing.T) {
 	screen := newCaretScreen(t, 2, 1)
 	a := &attach{screen: screen}
 	base := []protocol.Cell{
@@ -203,22 +182,20 @@ func TestCaretMoveRestoresUnderlyingCellAndInvertsReverse(t *testing.T) {
 		CursorX: 0, CursorY: 0, CursorVisible: true,
 	})
 	screen.Show()
-	inverted := base[0]
-	inverted.Style &^= protocol.StyleReverse
-	if got, want := screenStyleAt(t, screen, 0, 0), styleOf(inverted); got != want {
-		t.Fatalf("caret over reverse-video cell = %#v, want %#v", got, want)
+	if got := screenStyleAt(t, screen, 0, 0); got != styleOf(base[0]) {
+		t.Fatalf("caret over reverse-video cell style = %#v, want untouched %#v", got, styleOf(base[0]))
 	}
+	assertNativeCursor(t, screen, 0, 0, true)
 
 	a.applyFrame(protocol.Frame{
 		Cols: 2, Rows: 1, CursorX: 1, CursorY: 0, CursorVisible: true,
 	})
 	screen.Show()
-	if got, want := screenStyleAt(t, screen, 0, 0), styleOf(base[0]); got != want {
-		t.Errorf("old caret cell = %#v, want restored %#v", got, want)
+	if got := screenStyleAt(t, screen, 0, 0); got != styleOf(base[0]) {
+		t.Errorf("old caret cell style = %#v, want untouched %#v", got, styleOf(base[0]))
 	}
-	caret := base[1]
-	caret.Style |= protocol.StyleReverse
-	if got, want := screenStyleAt(t, screen, 1, 0), styleOf(caret); got != want {
-		t.Errorf("new caret cell = %#v, want %#v", got, want)
+	if got := screenStyleAt(t, screen, 1, 0); got != styleOf(base[1]) {
+		t.Errorf("new caret cell style = %#v, want untouched %#v", got, styleOf(base[1]))
 	}
+	assertNativeCursor(t, screen, 1, 0, true)
 }

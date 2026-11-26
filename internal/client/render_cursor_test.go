@@ -9,15 +9,28 @@ import (
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
-type noCombiningScreen struct {
+// cursorStyleScreen records DECSCUSR styles because tcell's simulation
+// screen deliberately ignores SetCursorStyle.
+type cursorStyleScreen struct {
 	tcell.SimulationScreen
+	styles []tcell.CursorStyle
 }
 
-func (s noCombiningScreen) CanDisplay(r rune, checkFallbacks bool) bool {
-	if r == caretBarOverlay {
-		return false
+func (s *cursorStyleScreen) SetCursorStyle(style tcell.CursorStyle, _ ...tcell.Color) {
+	s.styles = append(s.styles, style)
+}
+
+func newCursorStyleScreen(t *testing.T, cols, rows int) *cursorStyleScreen {
+	t.Helper()
+	return &cursorStyleScreen{SimulationScreen: newCaretScreen(t, cols, rows)}
+}
+
+func lastCursorStyle(t *testing.T, screen *cursorStyleScreen) tcell.CursorStyle {
+	t.Helper()
+	if len(screen.styles) == 0 {
+		t.Fatal("SetCursorStyle was not called")
 	}
-	return s.SimulationScreen.CanDisplay(r, checkFallbacks)
+	return screen.styles[len(screen.styles)-1]
 }
 
 func screenRunesAt(t *testing.T, screen tcell.SimulationScreen, x, y int) []rune {
@@ -29,24 +42,30 @@ func screenRunesAt(t *testing.T, screen tcell.SimulationScreen, x, y int) []rune
 	return append([]rune(nil), cells[y*width+x].Runes...)
 }
 
-func TestCaretShapesPreserveGlyphAndColors(t *testing.T) {
+func assertNativeCursor(t *testing.T, screen tcell.SimulationScreen, x, y int, visible bool) {
+	t.Helper()
+	gotX, gotY, gotVisible := screen.GetCursor()
+	if gotVisible != visible || (visible && (gotX != x || gotY != y)) {
+		t.Errorf("native cursor = (%d,%d,%v), want (%d,%d,%v)",
+			gotX, gotY, gotVisible, x, y, visible)
+	}
+}
+
+func TestCaretShapesUseNativeCursorStyles(t *testing.T) {
 	base := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236}
 	blank := blankClientCell(0, 1)
-	blockCell := base
-	blockCell.Style = protocol.StyleReverse
 	cases := []struct {
-		name      string
-		shape     uint8
-		wantStyle tcell.Style
-		wantRunes []rune
+		name  string
+		shape uint8
+		want  tcell.CursorStyle
 	}{
-		{"block", protocol.CursorShapeBlock, styleOf(blockCell), []rune{'A'}},
-		{"underline", protocol.CursorShapeUnderline, styleOf(base).Underline(tcell.UnderlineStyleSolid), []rune{'A'}},
-		{"bar", protocol.CursorShapeBar, styleOf(base), []rune{'A', caretBarOverlay}},
+		{"block", protocol.CursorShapeBlock, tcell.CursorStyleSteadyBlock},
+		{"underline", protocol.CursorShapeUnderline, tcell.CursorStyleSteadyUnderline},
+		{"bar", protocol.CursorShapeBar, tcell.CursorStyleSteadyBar},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			screen := newCaretScreen(t, 2, 1)
+			screen := newCursorStyleScreen(t, 2, 1)
 			a := &attach{screen: screen}
 			a.applyFrame(protocol.Frame{
 				Full: true, Cols: 2, Rows: 1,
@@ -55,72 +74,94 @@ func TestCaretShapesPreserveGlyphAndColors(t *testing.T) {
 			})
 			screen.Show()
 
-			if got := screenStyleAt(t, screen, 0, 0); got != tc.wantStyle {
-				t.Errorf("caret style = %#v, want %#v", got, tc.wantStyle)
+			if got := lastCursorStyle(t, screen); got != tc.want {
+				t.Errorf("native cursor style = %v, want %v", got, tc.want)
 			}
-			if got := screenRunesAt(t, screen, 0, 0); !reflect.DeepEqual(got, tc.wantRunes) {
-				t.Errorf("caret runes = %U, want %U", got, tc.wantRunes)
+			if got := screenRunesAt(t, screen, 0, 0); !reflect.DeepEqual(got, []rune{'A'}) {
+				t.Errorf("caret cell runes = %U, want [A]", got)
 			}
-			if _, _, visible := screen.GetCursor(); visible {
-				t.Error("hardware cursor is visible; caret should be software-rendered")
+			if got := screenStyleAt(t, screen, 0, 0); got != styleOf(base) {
+				t.Errorf("caret cell style = %#v, want untouched %#v", got, styleOf(base))
 			}
+			assertNativeCursor(t, screen, 0, 0, true)
 		})
 	}
 }
 
-func TestCaretUnderlineDoublesExistingUnderline(t *testing.T) {
-	base := protocol.Cell{
-		Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236,
-		Style: protocol.StyleUnderline | protocol.StyleBlink,
-	}
-	withoutBlink := base
-	withoutBlink.Style &^= protocol.StyleBlink
-	want := styleOf(withoutBlink).Underline(tcell.UnderlineStyleDouble)
-
-	screen := newCaretScreen(t, 2, 1)
+func TestCaretBlinkTogglesNativeCursorVisibility(t *testing.T) {
+	base := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236}
+	screen := newCursorStyleScreen(t, 2, 1)
 	a := &attach{screen: screen}
 	a.applyFrame(protocol.Frame{
 		Full: true, Cols: 2, Rows: 1,
 		Cells:         []protocol.Cell{base, blankClientCell(0, 1)},
-		CursorVisible: true, CursorShape: protocol.CursorShapeUnderline,
+		CursorVisible: true, CursorBlink: true,
 	})
 	screen.Show()
 
-	if got := screenStyleAt(t, screen, 0, 0); got != want {
-		t.Fatalf("double-underline caret style = %#v, want %#v", got, want)
+	if got := lastCursorStyle(t, screen); got != tcell.CursorStyleSteadyBlock {
+		t.Errorf("blinking cursor style = %v, want steady block", got)
 	}
-	if got := screenRunesAt(t, screen, 0, 0); !reflect.DeepEqual(got, []rune{'A'}) {
-		t.Errorf("caret runes = %U, want [A]", got)
+	assertNativeCursor(t, screen, 0, 0, true)
+
+	if !a.blinkCaret() {
+		t.Fatal("blinkCaret did not request a repaint")
+	}
+	screen.Show()
+	assertNativeCursor(t, screen, 0, 0, false)
+	if got := screenStyleAt(t, screen, 0, 0); got != styleOf(base) {
+		t.Errorf("blinked-off cell style = %#v, want untouched %#v", got, styleOf(base))
+	}
+
+	if !a.blinkCaret() {
+		t.Fatal("blinkCaret did not request a repaint on the shown phase")
+	}
+	screen.Show()
+	assertNativeCursor(t, screen, 0, 0, true)
+}
+
+func TestCaretOutsideFrameHidesNativeCursor(t *testing.T) {
+	base := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236}
+	screen := newCursorStyleScreen(t, 2, 1)
+	a := &attach{screen: screen}
+	a.applyFrame(protocol.Frame{
+		Full: true, Cols: 2, Rows: 1,
+		Cells:   []protocol.Cell{base, blankClientCell(0, 1)},
+		CursorX: 5, CursorY: 0, CursorVisible: true,
+	})
+	screen.Show()
+
+	assertNativeCursor(t, screen, 5, 0, false)
+	if got := lastCursorStyle(t, screen); got != tcell.CursorStyleSteadyBlock {
+		t.Errorf("native cursor style = %v, want steady block", got)
 	}
 }
 
-func TestCaretBarFallsBackWhenOverlayUnsupported(t *testing.T) {
+func TestApplicationHiddenCursorHidesNativeCursor(t *testing.T) {
 	base := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236}
-	sim := newCaretScreen(t, 2, 1)
-	screen := noCombiningScreen{sim}
+	screen := newCursorStyleScreen(t, 2, 1)
 	a := &attach{screen: screen}
 	a.applyFrame(protocol.Frame{
 		Full: true, Cols: 2, Rows: 1,
 		Cells:         []protocol.Cell{base, blankClientCell(0, 1)},
-		CursorVisible: true, CursorShape: protocol.CursorShapeBar,
+		CursorVisible: false, CursorBlink: true,
 	})
-	sim.Show()
+	screen.Show()
 
-	if got, want := screenRunesAt(t, sim, 0, 0), []rune{caretBarFallback}; !reflect.DeepEqual(got, want) {
-		t.Errorf("fallback caret runes = %U, want %U", got, want)
-	}
-	fallback := base
-	fallback.Ch = caretBarFallback
-	fallback.Style = protocol.StyleReverse
-	if got, want := screenStyleAt(t, sim, 0, 0), styleOf(fallback); got != want {
-		t.Errorf("fallback caret style = %#v, want %#v", got, want)
+	assertNativeCursor(t, screen, 0, 0, false)
+	if a.blinkCaret() {
+		t.Error("hidden cursor should not request a blink repaint")
 	}
 }
 
-func TestCaretBarPreservesAndRestoresWideCharacter(t *testing.T) {
+func TestCaretWideCharacterIsNotModified(t *testing.T) {
 	wide := protocol.Cell{Row: 0, Col: 0, Ch: '界', FG: 46, BG: 236}
-	base := []protocol.Cell{wide, blankClientCell(0, 1), {Row: 0, Col: 2, Ch: 'C', FG: 46, BG: 236}}
-	screen := newCaretScreen(t, 3, 1)
+	base := []protocol.Cell{
+		wide,
+		blankClientCell(0, 1),
+		{Row: 0, Col: 2, Ch: 'C', FG: 46, BG: 236},
+	}
+	screen := newCursorStyleScreen(t, 3, 1)
 	a := &attach{screen: screen}
 	a.applyFrame(protocol.Frame{
 		Full: true, Cols: 3, Rows: 1, Cells: base,
@@ -128,26 +169,32 @@ func TestCaretBarPreservesAndRestoresWideCharacter(t *testing.T) {
 	})
 	screen.Show()
 
-	if got, want := screenRunesAt(t, screen, 0, 0), []rune{'界', caretBarOverlay}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("wide bar caret runes = %U, want %U", got, want)
+	if got := screenRunesAt(t, screen, 0, 0); !reflect.DeepEqual(got, []rune{'界'}) {
+		t.Fatalf("wide caret cell runes = %U, want [界]", got)
 	}
+	if got := screenStyleAt(t, screen, 0, 0); got != styleOf(wide) {
+		t.Errorf("wide caret cell style = %#v, want untouched %#v", got, styleOf(wide))
+	}
+	assertNativeCursor(t, screen, 0, 0, true)
+
 	a.applyFrame(protocol.Frame{
 		Cols: 3, Rows: 1, CursorX: 2,
 		CursorVisible: true, CursorShape: protocol.CursorShapeBar,
 	})
 	screen.Show()
 
-	if got, want := screenRunesAt(t, screen, 0, 0), []rune{'界'}; !reflect.DeepEqual(got, want) {
-		t.Errorf("restored wide cell runes = %U, want %U", got, want)
+	if got := screenRunesAt(t, screen, 0, 0); !reflect.DeepEqual(got, []rune{'界'}) {
+		t.Errorf("old wide caret cell runes = %U, want [界]", got)
 	}
-	if got, want := screenStyleAt(t, screen, 0, 0), styleOf(wide); got != want {
-		t.Errorf("restored wide cell style = %#v, want %#v", got, want)
+	if got := screenStyleAt(t, screen, 0, 0); got != styleOf(wide) {
+		t.Errorf("old wide caret cell style = %#v, want untouched %#v", got, styleOf(wide))
 	}
+	assertNativeCursor(t, screen, 2, 0, true)
 }
 
 func TestBlinkOffIsSteadyAndStyleChangeResetsPhase(t *testing.T) {
 	base := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236}
-	screen := newCaretScreen(t, 2, 1)
+	screen := newCursorStyleScreen(t, 2, 1)
 	a := &attach{screen: screen}
 	frame := protocol.Frame{
 		Full: true, Cols: 2, Rows: 1,
@@ -164,7 +211,10 @@ func TestBlinkOffIsSteadyAndStyleChangeResetsPhase(t *testing.T) {
 		CursorBlink: true, CursorShape: protocol.CursorShapeUnderline,
 	})
 	if a.caretBlinkOff {
-		t.Fatal("style change did not reset the blink phase to lit")
+		t.Fatal("style change did not reset the blink phase to shown")
+	}
+	if got := lastCursorStyle(t, screen); got != tcell.CursorStyleSteadyUnderline {
+		t.Errorf("changed cursor style = %v, want steady underline", got)
 	}
 
 	a.applyFrame(protocol.Frame{
@@ -172,9 +222,12 @@ func TestBlinkOffIsSteadyAndStyleChangeResetsPhase(t *testing.T) {
 		CursorBlink: false, CursorShape: protocol.CursorShapeBlock,
 	})
 	if a.caretBlinkOff {
-		t.Fatal("steady caret should always be lit")
+		t.Fatal("steady caret should always be shown")
 	}
 	if a.blinkCaret() {
 		t.Error("steady caret should not request a blink repaint")
+	}
+	if got := lastCursorStyle(t, screen); got != tcell.CursorStyleSteadyBlock {
+		t.Errorf("steady cursor style = %v, want steady block", got)
 	}
 }
