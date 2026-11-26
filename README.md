@@ -26,10 +26,27 @@ one binary, an automatically managed TOML config file, categorized help on
 demand, and an interactive settings page when you want to tune the experience.
 It is an early, deliberately small implementation focused on the essentials.
 
-[Quick start](#quick-start) · [Why qmm](#why-qmm) ·
+[Demo](#demo) · [Quick start](#quick-start) · [Why qmm](#why-qmm) ·
 [Keyboard and mouse](#keyboard-and-mouse) ·
 [Copy mode](#scrollback-and-vim-style-copy-mode) ·
 [Under the hood](#under-the-hood) · [Current scope](#current-scope)
+
+## Demo
+
+![qmm demo: multi-pane, multi-window and floating zoom](assets/demo.gif)
+
+A 34-second real recording: every pane is running something live.
+
+- Left pane: `btop` with live CPU / memory / network graphs.
+- Top-right pane: scrolling color log tail.
+- Bottom-right small pane: `cmatrix -r` rainbow — this is the pane that gets zoomed.
+- Second window: `htop`, switched with `Ctrl-a` `n` / `p`.
+
+Flow: split with `Ctrl-a` `|` then `Ctrl-a` `-`, jump with `Ctrl-a` `q`,
+float-zoom the small `cmatrix` pane with `Ctrl-a` `z`
+(centered overlay, original 3-pane layout stays behind, `Z` flag in the
+status bar), toggle back with `Ctrl-a` `z` again, open a new window with
+`Ctrl-a` `c`, then `Ctrl-a` `d` to detach.
 
 ## Why qmm?
 
