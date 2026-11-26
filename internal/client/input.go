@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"strconv"
 	"unicode"
 	"unicode/utf8"
@@ -86,6 +87,12 @@ func encodeKey(ev *tcell.EventKey) []byte {
 		return withAlt([]byte{byte(key-tcell.KeyCtrlA) + 1}, alt)
 	case key == tcell.KeyRune:
 		r := ev.Rune()
+		if ctrl && shift && ((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			// Keep Ctrl-Shift-<letter> distinguishable from Ctrl-<letter> by
+			// re-encoding it in xterm's modifyOtherKeys format. The server
+			// matches this sequence for the configurable copy key.
+			return []byte(fmt.Sprintf("\x1b[27;6;%d~", unicode.ToLower(r)))
+		}
 		if ctrl && ((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
 			return withAlt([]byte{byte(unicode.ToLower(r)) - 'a' + 1}, alt)
 		}

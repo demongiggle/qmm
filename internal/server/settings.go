@@ -28,6 +28,7 @@ const (
 	settingResizeStep      settingID = "resize_step"
 	settingAutoNameWindows settingID = "auto_name_windows"
 	settingConfirmShutdown settingID = "confirm_shutdown"
+	settingCopyKey         settingID = "copy_key"
 )
 
 var (
@@ -48,6 +49,8 @@ var (
 
 	resizeStepNames  = []string{"1 cell", "2 cells", "4 cells"}
 	resizeStepValues = []int{1, 2, 4}
+
+	copyKeyNames = []string{"Ctrl-Shift-C", "Ctrl-Shift-X", "Ctrl-Y", "Ctrl-Insert"}
 )
 
 // settingDef is one adjustable row in the settings page. Default is an
@@ -93,6 +96,12 @@ var settingsSections = []settingsSection{
 		Title: "Session",
 		Options: []settingDef{
 			{ID: settingConfirmShutdown, Label: "Confirm shutdown", Values: onOffValues, Default: 0},
+		},
+	},
+	{
+		Title: "Copy mode",
+		Options: []settingDef{
+			{ID: settingCopyKey, Label: "Copy selection key", Values: copyKeyNames, Default: 0},
 		},
 	},
 }
@@ -593,4 +602,24 @@ func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, c
 		setCell(valueX+i, y, ' ', vfg, vbg, protocol.StyleBold)
 	}
 	putHelpText(setCell, valueX, y, valueWidth, value, vfg, vbg, protocol.StyleBold)
+}
+
+// copyKeySequence maps the configured copy-selection key to the byte
+// sequence the client emits for it (see encodeKey in internal/client).
+// Unknown or nil settings fall back to the default, Ctrl-Shift-C.
+func copyKeySequence(st *settingsState) string {
+	def, ok := settingByID(settingCopyKey)
+	if !ok || st == nil {
+		return "\x1b[27;6;99~"
+	}
+	switch st.text(def) {
+	case "Ctrl-Shift-X":
+		return "\x1b[27;6;120~"
+	case "Ctrl-Y":
+		return "\x19"
+	case "Ctrl-Insert":
+		return "\x1b[2;5~"
+	default: // Ctrl-Shift-C
+		return "\x1b[27;6;99~"
+	}
 }

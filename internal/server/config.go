@@ -25,6 +25,7 @@ type fileConfig struct {
 	Panes      panesConfig      `toml:"panes"`
 	Layout     layoutConfig     `toml:"layout"`
 	Session    sessionConfig    `toml:"session"`
+	Copy       copyConfig       `toml:"copy"`
 }
 
 type appearanceConfig struct {
@@ -46,6 +47,10 @@ type layoutConfig struct {
 
 type sessionConfig struct {
 	ConfirmShutdown string `toml:"confirm_shutdown"`
+}
+
+type copyConfig struct {
+	CopyKey string `toml:"copy_key"`
 }
 
 type configSetting struct {
@@ -96,6 +101,9 @@ func configFromSettings(st *settingsState) fileConfig {
 		Session: sessionConfig{
 			ConfirmShutdown: settingText(st, settingConfirmShutdown),
 		},
+		Copy: copyConfig{
+			CopyKey: settingText(st, settingCopyKey),
+		},
 	}
 }
 
@@ -110,6 +118,7 @@ func (fc fileConfig) orderedSettings() []configSetting {
 		{settingResizeStep, fc.Layout.KeyboardResizeStep},
 		{settingAutoNameWindows, fc.Layout.AutomaticWindowNames},
 		{settingConfirmShutdown, fc.Session.ConfirmShutdown},
+		{settingCopyKey, fc.Copy.CopyKey},
 	}
 }
 

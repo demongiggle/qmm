@@ -45,7 +45,7 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	for _, key := range []string{
 		"status_bar_clock", "active_pane_border", "cursor_shape", "cursor_blink",
 		"pane_number_timeout", "double_click_zoom", "keyboard_resize_step",
-		"automatic_window_names", "confirm_shutdown",
+		"automatic_window_names", "confirm_shutdown", "copy_key",
 	} {
 		if !strings.Contains(string(raw), key) {
 			t.Errorf("default config missing key %q:\n%s", key, raw)
@@ -55,12 +55,16 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	st.setByID(settingCursorShape, 2)
 	st.setByID(settingCursorBlink, 0)
 	st.setByID(settingBorderColor, 1)
+	st.setByID(settingCopyKey, 2)
 	if err := writeConfig(path, &st); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	loaded, warning := loadConfig(path)
 	if warning != nil {
 		t.Fatalf("valid config produced warning: %+v", *warning)
+	}
+	if got := copyKeySequence(&loaded); got != "\x19" {
+		t.Fatalf("loaded copy key = %q, want Ctrl-Y sequence", got)
 	}
 	if loaded.cursorShape() != protocol.CursorShapeBar || !loaded.cursorBlink() {
 		t.Fatalf("loaded cursor = shape:%d blink:%v, want blinking bar", loaded.cursorShape(), loaded.cursorBlink())

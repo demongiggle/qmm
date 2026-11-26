@@ -143,6 +143,21 @@ type ActionWheel struct {
 	Delta int
 }
 
+// ActionSelectStart begins a mouse text selection anchored at cell (X, Y) in
+// screen coordinates. Sent when a drag crosses into a different cell than the
+// one the press started in. The server opens copy mode on the active pane and
+// starts a character-wise selection at the cell.
+type ActionSelectStart struct {
+	X, Y int
+}
+
+// ActionSelectUpdate extends an in-progress mouse selection to cell (X, Y) in
+// screen coordinates. Sent for every pointer motion event while a selection
+// drag is active.
+type ActionSelectUpdate struct {
+	X, Y int
+}
+
 // ---------------------------------------------------------------------------
 // server -> client messages
 // ---------------------------------------------------------------------------
@@ -246,6 +261,8 @@ func init() {
 	gob.Register(ActionDragUpdate{})
 	gob.Register(ActionDragEnd{})
 	gob.Register(ActionWheel{})
+	gob.Register(ActionSelectStart{})
+	gob.Register(ActionSelectUpdate{})
 
 	gob.Register(Welcome{})
 	gob.Register(Frame{})

@@ -66,6 +66,15 @@ type attach struct {
 	lastDragAxis int
 	mouseDown    bool
 
+	// Text-selection gesture: armed on a press inside a pane, promoted to
+	// selecting once the pointer leaves the press cell. While selecting,
+	// splitter-drag handling is bypassed and motion events stream
+	// ActionSelectStart/ActionSelectUpdate to the server.
+	selectArmed   bool
+	selecting     bool
+	selectAnchorX int
+	selectAnchorY int
+
 	pendingClick paneClick
 	lastClick    paneClick
 }
@@ -340,13 +349,32 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	}
 	// Ignore input outside the server-rendered area (e.g. when this
 	// terminal is bigger than the effective session size). A press there
-	// can never start a gesture; a release ends one.
+	// can never start a gesture; a release ends one. While a selection
+	// drag is active, clamp the pointer into the frame so the selection
+	// can extend to the edge instead of being dropped.
 	if a.frameCols > 0 && a.frameRows > 0 && (x >= a.frameCols || y >= a.frameRows) {
+		if a.selecting && ev.Buttons()&tcell.ButtonPrimary != 0 {
+			cx, cy := x, y
+			if cx < 0 {
+				cx = 0
+			} else if cx >= a.frameCols {
+				cx = a.frameCols - 1
+			}
+			if cy < 0 {
+				cy = 0
+			} else if cy >= a.frameRows {
+				cy = a.frameRows - 1
+			}
+			_ = a.codec.Send(protocol.ActionSelectUpdate{X: cx, Y: cy})
+			return
+		}
 		a.clearClicks()
 		primary := ev.Buttons()&tcell.ButtonPrimary != 0
 		switch {
 		case !primary:
 			a.mouseDown = false
+			a.selectArmed = false
+			a.selecting = false
 			if a.dragging {
 				_ = a.codec.Send(protocol.ActionDragEnd{Splitter: a.dragID})
 				a.dragging = false
@@ -363,6 +391,8 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	case pressed && !a.mouseDown:
 		// Button press.
 		a.mouseDown = true
+		a.selectArmed = false
+		a.selecting = false
 		pane, onPane := a.paneAt(x, y)
 		if onPane && a.isDoubleClick(x, y, pane.ID) {
 			a.clearClicks()
@@ -375,7 +405,25 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 			a.clearClicks()
 			return
 		}
+		a.selectArmed = true
+		a.selectAnchorX, a.selectAnchorY = x, y
 		a.pendingClick = paneClick{x: x, y: y, paneID: pane.ID, at: time.Now()}
+	case pressed && a.mouseDown && a.selecting:
+		// Selection drag in progress: extend it.
+		_ = a.codec.Send(protocol.ActionSelectUpdate{X: x, Y: y})
+		return
+	case pressed && a.mouseDown && a.selectArmed:
+		// A press inside a pane becomes a selection once the pointer
+		// leaves the cell the press started in; until then it is a click.
+		if x == a.selectAnchorX && y == a.selectAnchorY {
+			return
+		}
+		a.selecting = true
+		a.clearClicks()
+		debugLog("selection start anchor %d,%d at %d,%d", a.selectAnchorX, a.selectAnchorY, x, y)
+		_ = a.codec.Send(protocol.ActionSelectStart{X: a.selectAnchorX, Y: a.selectAnchorY})
+		_ = a.codec.Send(protocol.ActionSelectUpdate{X: x, Y: y})
+		return
 	case pressed && a.mouseDown && a.dragging:
 		// Drag in progress.
 		axis := x
@@ -392,6 +440,8 @@ func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	case !pressed && a.mouseDown:
 		// Release.
 		a.mouseDown = false
+		a.selectArmed = false
+		a.selecting = false
 		if a.dragging {
 			_ = a.codec.Send(protocol.ActionDragEnd{Splitter: a.dragID})
 			a.dragging = false

@@ -141,3 +141,73 @@ func TestCopyModeScrollbackAndClipboardIntegration(t *testing.T) {
 		return strings.Contains(text, "AFTER-COPY")
 	})
 }
+
+func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	t.Cleanup(func() {
+		conn, err := net.DialTimeout("unix", sock, time.Second)
+		if err != nil {
+			return
+		}
+		_ = protocol.NewCodec(conn).Send(protocol.Shutdown{})
+		_ = conn.Close()
+	})
+
+	go func() { _ = Run(cfg) }()
+	waitSocket(t, sock)
+	c := dial(t, sock, 80, 24)
+	defer c.conn.Close()
+
+	if _, ok := c.recv().(protocol.Welcome); !ok {
+		t.Fatal("expected Welcome")
+	}
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo MOUSESEL-MARKER\n")}); err != nil {
+		t.Fatalf("echo marker: %v", err)
+	}
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "MOUSESEL-MARKER")
+	})
+
+	// Drag across the whole screen: the marker must end up inside the selection.
+	for _, msg := range []interface{}{
+		protocol.ActionSelectStart{X: 0, Y: 0},
+		protocol.ActionSelectUpdate{X: 79, Y: 22},
+	} {
+		if err := c.codec.Send(msg); err != nil {
+			t.Fatalf("select: %v", err)
+		}
+	}
+
+	// The default copy key (Ctrl-Shift-C) copies the selection and leaves
+	// copy mode, restoring the live pane.
+	if err := c.codec.Send(protocol.Input{Data: []byte("\x1b[27;6;99~")}); err != nil {
+		t.Fatalf("copy key: %v", err)
+	}
+	var clip protocol.Clipboard
+	gotClip := false
+	for i := 0; i < 50 && !gotClip; i++ {
+		if msg, ok := c.recv().(protocol.Clipboard); ok {
+			clip, gotClip = msg, true
+		}
+	}
+	if !gotClip {
+		t.Fatal("copy key did not send a Clipboard message")
+	}
+	if !strings.Contains(clip.Text, "MOUSESEL-MARKER") {
+		t.Fatalf("clipboard = %q, want it to contain MOUSESEL-MARKER", clip.Text)
+	}
+
+	// Live mode is restored: the pane receives input again.
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo AFTER-MOUSE-SELECT\n")}); err != nil {
+		t.Fatalf("type after copy: %v", err)
+	}
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "AFTER-MOUSE-SELECT")
+	})
+}

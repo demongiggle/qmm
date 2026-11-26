@@ -41,7 +41,7 @@ It is an early, deliberately small implementation focused on the essentials.
 | **Navigation without a detour** | `Ctrl-a` `o` cycles panes, `Ctrl-a` `q` overlays large pane numbers for instant jumps, and `Ctrl-a` `Ctrl-a` sends a literal Ctrl-a to the application. |
 | **Mouse-ready, keyboard-complete** | Click to focus, double-click to zoom, click a status-bar tab to switch windows, or drag a divider to resize. Every core action also has a keyboard path. |
 | **Focus without losing the big picture** | Floating zoom lifts the active pane above the split layout, centered with at least a 2% margin. Toggle it again and the original layout returns. |
-| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback; select with `v` / `V`, copy with `y` to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
+| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback, or drag with the mouse to select directly; copy with `Ctrl-Shift-C` (configurable) or `y` to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
 | **Terminal color that stays true** | Pane output preserves ANSI 16-color, 256-color, and 24-bit RGB styling, while active borders, window tabs, and help are color-coded for quick orientation. |
 | **Guidance, tuning, and a safety net** | Categorized help, a scrollable settings page, and an optional y/n confirmation before shutdown keep powerful actions discoverable and deliberate. |
 | **One view, multiple terminals** | Multiple clients can attach to the same session. Like tmux, the effective terminal size follows the smallest attached client. |
@@ -207,10 +207,10 @@ to close it. The menu is local to the attached client.
 `Ctrl-r` to reload external config edits, or `q`, `Esc`, `Ctrl-c`, `s`, or
 `Ctrl-a` `s` to close.
 
-Tune nine values: the status clock, active border color, cursor shape
+Tune ten values: the status clock, active border color, cursor shape
 (`Block`, `Underline`, or `Bar`), cursor blink, pane-number timeout,
-double-click zoom, keyboard resize step, automatic window names, and shutdown
-confirmation. The default caret is a steady block; turn **Cursor blink** on for
+double-click zoom, keyboard resize step, automatic window names, shutdown
+confirmation, and the copy-selection key. The default caret is a steady block; turn **Cursor blink** on for
 the 500 ms blink cycle. **Cursor shape** uses the host terminal's native
 DECSCUSR caret — steady block, underline, or bar — so the underlying pane text
 stays visible. qmm toggles that caret's visibility for blinking, keeping its
@@ -234,7 +234,16 @@ client.
 `Ctrl-a` `[` opens copy mode, a full-screen view of the active pane's
 scrollback (2,000 lines per pane) plus its current screen. Movement is
 vim-style, and the overlay belongs only to the attached client that opened it —
-other clients keep using the pane as usual.
+other clients keep using the pane as usual. Dragging over text with the mouse
+selects it directly, without leaving the live view first: qmm snapshots the
+scrollback into a copy-mode view with the selection anchored where you pressed
+the button. The status bar stays in place while a mouse selection is active.
+Press the configured copy key (`Ctrl-Shift-C` by default; see
+[settings](#help-and-settings-right-where-you-work)) to copy the selection and
+return to the live pane; `y` or `Enter` work too. While the selection is
+active, the mouse wheel scrolls the snapshot and extends the selection into
+scrollback. The selection highlight stays visible until you copy or leave
+copy mode (`Esc`).
 
 | Key | Action |
 | :--- | :--- |
@@ -246,8 +255,18 @@ other clients keep using the pane as usual.
 | `Ctrl-u` / `Ctrl-d`, `Ctrl-b` / `Ctrl-f`, `PgUp` / `PgDn` | Half / full page |
 | `/` / `?`, `n` / `N` | Search forward / backward, repeat / reverse |
 | `v` / `V` / `Ctrl-v` | Character / line / rectangle selection |
+| `Ctrl-Shift-C` (configurable) | Copy the selection and leave copy mode |
 | `y`, Enter | Copy the selection and leave copy mode |
 | `q`, `Esc`, `Ctrl-c` | Leave copy mode without copying |
+
+The copy key is configured in the **Copy mode** settings section (or as
+`copy_key` under `[copy]` in `config.toml`) and accepts `Ctrl-Shift-C`
+(default), `Ctrl-Shift-X`, `Ctrl-Y`, or `Ctrl-Insert`. Note that many
+terminals grab `Ctrl-Shift-C` for their own clipboard and never forward it;
+pick another binding there if copies seem to do nothing. `y` and `Enter`
+always work. The selection is a character-wise snapshot: text is captured
+as of the moment the drag started, so output that scrolls in afterwards is
+not part of the selection.
 
 Motions accept a numeric prefix (`10j`, `3w`), and the view follows the
 cursor. `y` with no active selection copies the current line. Copied text goes
@@ -273,6 +292,18 @@ moves through the active pane's scrollback; see
 [Scrollback and vim-style copy mode](#scrollback-and-vim-style-copy-mode).
 If help, settings, or pane numbers are open, a wheel event dismisses that
 overlay instead.
+
+Drag across text in a pane to select it. The moment the pointer leaves the
+cell it started in, qmm opens a copy-mode view of that pane's scrollback with
+a character-wise selection anchored at the press point; the selection
+highlight stays visible after you release the button. Scrolling the wheel
+with a selection active extends it into (or back out of) the scrollback.
+Pressing the configured copy key — `Ctrl-Shift-C` by default — copies the
+selection to the host clipboard and qmm's paste buffer and returns to the
+live pane, where `Ctrl-a` `]` pastes it. `Esc` cancels without copying.
+Plain clicks (no drag) behave as before: click to focus, double-click to zoom.
+While a selection is open the mouse is otherwise captured by the selection, so
+window-switch clicks are ignored until you copy or cancel.
 
 ### Deliberate shutdown
 

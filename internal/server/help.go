@@ -72,7 +72,7 @@ var helpSections = []helpSection{
 			{"Click", "Focus pane"},
 			{"Double-click", "Zoom / restore"},
 			{"Tab click", "Switch window"},
-			{"Drag", "Resize divider"},
+			{"Drag", "Divider resize / text select"},
 		},
 	},
 }

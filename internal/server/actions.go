@@ -35,11 +35,13 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		}
 	}
 	// Copy mode is a full-screen modal: input, resize, wheel and lifecycle
-	// messages reach it, but mouse gestures and pane actions are swallowed so
-	// they cannot change the session while the user is selecting text.
+	// messages reach it, but other pane actions are swallowed. Mouse
+	// selection gestures are allowed so a drag that started before the
+	// overlay opened can keep extending the selection.
 	if c.copyMode != nil && c.copyMode.open {
 		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane, protocol.ActionWheel:
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane, protocol.ActionWheel,
+			protocol.ActionSelectStart, protocol.ActionSelectUpdate:
 		default:
 			return false
 		}
@@ -142,6 +144,10 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		c.dragActive = false
 	case protocol.ActionWheel:
 		s.handleWheel(c, msg.Delta)
+	case protocol.ActionSelectStart:
+		s.handleSelectStart(c, msg.X, msg.Y)
+	case protocol.ActionSelectUpdate:
+		s.handleSelectUpdate(c, msg.X, msg.Y)
 	case forceKillPane:
 		if p, ok := s.sess.panes[msg.paneID]; ok {
 			_ = p.ptmx.Close()

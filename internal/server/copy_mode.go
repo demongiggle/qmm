@@ -46,9 +46,13 @@ type copyPoint struct {
 type copyModeState struct {
 	open   bool
 	paneID int
-	lines  []copyLine
-	cols   int // host screen size, used for the overlay viewport
-	rows   int
+	// mouseOrigin is true when the copy view was entered by dragging with the
+	// mouse. It keeps the regular status bar (instead of the copy-mode hint
+	// line) and tells the wheel path it is extending a mouse selection.
+	mouseOrigin bool
+	lines       []copyLine
+	cols        int // host screen size, used for the overlay viewport
+	rows        int
 
 	top    int // first buffer line shown
 	cursor copyPoint
@@ -467,6 +471,56 @@ func (s *Server) closeCopyMode(c *clientConn) {
 	s.broadcast()
 }
 
+// scrToBuffer maps screen cell coordinates to a position in the copy-mode
+// buffer. The copy view draws viewRows lines starting at st.top; the status
+// row maps to the last visible line. Columns are clamped to the line length.
+func (st *copyModeState) scrToBuffer(x, y int) copyPoint {
+	viewRows := st.viewRows()
+	row := clampInt(y, 0, viewRows-1)
+	line := st.top + row
+	if len(st.lines) == 0 {
+		line = 0
+	} else {
+		line = clampInt(line, 0, len(st.lines)-1)
+	}
+	maxCol := st.lineLen(line) - 1
+	if maxCol < 0 {
+		maxCol = 0
+	}
+	return copyPoint{line: line, col: clampInt(x, 0, maxCol)}
+}
+
+// handleSelectStart anchors a mouse drag selection. If copy mode is not open
+// yet (live pane), it opens it on the active pane first; the view therefore
+// starts at the bottom of the buffer and the visible screen lines map 1:1.
+func (s *Server) handleSelectStart(c *clientConn, x, y int) {
+	if c.copyMode == nil || !c.copyMode.open {
+		s.openCopyMode(c, 0)
+	}
+	st := c.copyMode
+	if st == nil || !st.open {
+		return
+	}
+	st.mouseOrigin = true
+	st.selKind = selectionChar
+	st.searchActive = false
+	p := st.scrToBuffer(x, y)
+	st.anchor, st.cursor = p, p
+	st.clearCount()
+	c.forceFull = true
+	s.broadcast()
+}
+
+func (s *Server) handleSelectUpdate(c *clientConn, x, y int) {
+	st := c.copyMode
+	if st == nil || !st.open || !st.mouseOrigin {
+		return
+	}
+	st.cursor = st.scrToBuffer(x, y)
+	c.forceFull = true
+	s.broadcast()
+}
+
 func (s *Server) resizeCopyModes() {
 	for c := range s.clients {
 		st := c.copyMode
@@ -493,7 +547,8 @@ func (s *Server) handleWheel(c *clientConn, delta int) {
 		return
 	}
 	if delta < 0 {
-		st.scrollBy(clampInt(-delta, 0, 20) * wheelStepLines)
+		// Towards older scrollback lines.
+		st.scrollBy(-clampInt(-delta, 0, 20) * wheelStepLines)
 	} else {
 		before := st.top
 		st.scrollBy(clampInt(delta, 0, 20) * wheelStepLines)
@@ -595,6 +650,13 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 		}
 		c.forceFull = true
 		s.broadcast()
+		return
+	}
+
+	// The configured copy key behaves like y: copy the selection and leave
+	// copy mode. y and Enter remain available as built-in fallbacks.
+	if s.sess != nil && seq == copyKeySequence(s.sess.opts()) {
+		s.copySelection(c)
 		return
 	}
 
@@ -720,7 +782,7 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 // overlay rendering
 // ---------------------------------------------------------------------------
 
-func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, cols, rows int, st *copyModeState) {
+func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, cols, rows int, st *copyModeState, s *session, opts *settingsState) {
 	frame.Panes = nil
 	frame.Splitters = nil
 	frame.Tabs = nil
@@ -763,6 +825,12 @@ func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, co
 
 	statusY := rows - 1
 	if statusY < 0 {
+		return
+	}
+	if st.mouseOrigin {
+		// Mouse drag-selection keeps the regular status bar so the window
+		// tabs stay visible while the selection is active.
+		c.drawStatusBar(frame, setCell, s, opts, cols, rows)
 		return
 	}
 	for x := 0; x < cols; x++ {
