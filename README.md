@@ -235,7 +235,9 @@ cursor. `y` with no active selection copies the current line. Copied text goes
 to the host terminal's clipboard through an OSC 52 escape sequence (supported
 by xterm, iTerm2, WezTerm, kitty, and others) and is also kept in qmm's paste
 buffer, so `Ctrl-a` `]` types it into the active pane even on terminals that
-ignore OSC 52. Clipboard payloads are capped at 64 KiB.
+ignore OSC 52. The paste buffer is shared by all attached clients (as in
+tmux), so a later `y` replaces it for everyone. Clipboard payloads are capped
+at 64 KiB.
 
 Scrollback is line-oriented: ordinary shell output is captured as it scrolls
 off the top, while alternate-screen applications (vim, less, top) are not
@@ -250,6 +252,8 @@ layout. Click a window name in the status bar to switch windows, and drag a
 border between panes to resize live. Scrolling the wheel enters copy mode and
 moves through the active pane's scrollback; see
 [Scrollback and vim-style copy mode](#scrollback-and-vim-style-copy-mode).
+If help, settings, or pane numbers are open, a wheel event dismisses that
+overlay instead.
 
 ### Deliberate shutdown
 

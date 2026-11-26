@@ -511,15 +511,29 @@ func (s *Server) copySelection(c *clientConn) {
 	if st == nil || !st.open {
 		return
 	}
-	text := st.selectedText()
-	if len(text) > clipboardLimit {
-		text = text[:clipboardLimit]
-	}
+	text := clampClipboardText(st.selectedText(), clipboardLimit)
 	if text != "" {
 		s.pasteBuffer = text
 		c.enqueue(protocol.Clipboard{Text: text})
 	}
 	s.closeCopyMode(c)
+}
+
+// clampClipboardText caps a selection at limit bytes without cutting a
+// multi-byte UTF-8 rune in half. The result is always valid UTF-8 for the
+// rune-based text produced by copyLine.text().
+func clampClipboardText(text string, limit int) string {
+	if limit < 0 {
+		limit = 0
+	}
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
 }
 
 func (s *Server) pasteClipboard(c *clientConn) {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/demongiggle/qmm/internal/protocol"
 )
@@ -256,5 +257,34 @@ func TestCopyModeGuardSwallowsPaneActions(t *testing.T) {
 	}
 	if !s.handleClientMessage(clientMsg{cli: c, msg: protocol.Input{Data: []byte("q")}}) && c.copyMode != nil {
 		t.Fatal("copy-mode input was not handled")
+	}
+}
+
+func TestCopySelectionClampsOnUTF8Boundary(t *testing.T) {
+	// 'ü' is two bytes and straddles the byte limit; slicing at the raw
+	// limit would leave a lone continuation byte in the clipboard.
+	tail := strings.Repeat("a", clipboardLimit-1) + "ü"
+	want := strings.Repeat("a", clipboardLimit-1)
+	if got := clampClipboardText(tail, clipboardLimit); got != want || !utf8.ValidString(got) {
+		t.Fatalf("clamp = %d valid=%v, want %d-byte valid prefix", len(got), utf8.ValidString(got), len(want))
+	}
+	exact := strings.Repeat("b", clipboardLimit)
+	if got := clampClipboardText(exact, clipboardLimit); got != exact {
+		t.Fatal("a limit on a rune boundary should keep the whole text")
+	}
+
+	// The copy path stores and sends the same clamped text.
+	s, c, st := newCopyModeFixture(80, 24, []copyLine{lineOf(tail)})
+	st.gotoLine(0)
+	s.copySelection(c)
+	clip, ok := queuedClipboard(c)
+	if !ok {
+		t.Fatal("copy did not emit a Clipboard message")
+	}
+	if !utf8.ValidString(clip.Text) || clip.Text != want {
+		t.Fatalf("clipboard len=%d valid=%v, want %d-byte valid prefix", len(clip.Text), utf8.ValidString(clip.Text), len(want))
+	}
+	if s.pasteBuffer != want {
+		t.Fatalf("paste buffer len=%d, want %d", len(s.pasteBuffer), len(want))
 	}
 }

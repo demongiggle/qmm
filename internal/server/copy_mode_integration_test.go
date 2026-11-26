@@ -10,6 +10,50 @@ import (
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
+// screenState rebuilds the current screen from full and incremental frames.
+// The server coalesces diffs, so a single frame may contain only the cells
+// that changed; checking one frame's text is not enough for a stable test.
+type screenState struct {
+	cols, rows int
+	cells      map[[2]int]rune
+}
+
+func (st *screenState) apply(f protocol.Frame) string {
+	if f.Full || st.cols != f.Cols || st.rows != f.Rows {
+		st.cols, st.rows = f.Cols, f.Rows
+		st.cells = make(map[[2]int]rune)
+	}
+	for _, cell := range f.Cells {
+		st.cells[[2]int{cell.Row, cell.Col}] = cell.Ch
+	}
+	var sb strings.Builder
+	for y := 0; y < st.rows; y++ {
+		for x := 0; x < st.cols; x++ {
+			ch, ok := st.cells[[2]int{y, x}]
+			if !ok {
+				ch = ' '
+			}
+			sb.WriteRune(ch)
+		}
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
+func (tc *testClient) waitForScreen(pred func(string) bool) string {
+	tc.t.Helper()
+	st := &screenState{}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		text := st.apply(tc.recvFrame())
+		if pred(text) {
+			return text
+		}
+	}
+	tc.t.Fatal("timed out waiting for matching screen")
+	return ""
+}
+
 func TestCopyModeScrollbackAndClipboardIntegration(t *testing.T) {
 	t.Setenv("SHELL", "/bin/sh")
 	dir := t.TempDir()
@@ -31,12 +75,11 @@ func TestCopyModeScrollbackAndClipboardIntegration(t *testing.T) {
 	c := dial(t, sock, 80, 24)
 	defer c.conn.Close()
 
-	// Consume the handshake and first full repaint before typing, matching
-	// the other integration tests' client setup.
+	// Consume the handshake; waitForScreen accumulates the first full frame
+	// and all later incremental diffs.
 	if _, ok := c.recv().(protocol.Welcome); !ok {
 		t.Fatal("expected Welcome")
 	}
-	c.recvFrame()
 
 	// Produce more output than the pane can show, so early lines must come
 	// from scrollback rather than the live screen.
@@ -44,16 +87,16 @@ func TestCopyModeScrollbackAndClipboardIntegration(t *testing.T) {
 	if err := c.codec.Send(protocol.Input{Data: []byte(cmd)}); err != nil {
 		t.Fatalf("print lines: %v", err)
 	}
-	c.waitForFrame(func(f protocol.Frame) bool {
-		return strings.Contains(frameText(f), "SB-40")
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "SB-40")
 	})
 
 	// prefix+[ opens the vim-keyed copy mode overlay.
 	if err := c.codec.Send(protocol.Input{Data: []byte{0x01, '['}}); err != nil {
 		t.Fatalf("prefix [: %v", err)
 	}
-	c.waitForFrame(func(f protocol.Frame) bool {
-		return strings.Contains(frameText(f), "[copy mode]")
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "[copy mode]")
 	})
 
 	// Vim-style forward search jumps into the scrollback.
@@ -62,12 +105,11 @@ func TestCopyModeScrollbackAndClipboardIntegration(t *testing.T) {
 			t.Fatalf("search key %q: %v", key, err)
 		}
 	}
-	found := c.waitForFrame(func(f protocol.Frame) bool {
-		text := frameText(f)
+	found := c.waitForScreen(func(text string) bool {
 		return strings.Contains(text, "SB-1") && strings.Contains(text, "[copy mode]")
 	})
-	if !strings.Contains(frameText(found), "[copy mode]") {
-		t.Fatalf("copy mode overlay disappeared during search:\n%s", frameText(found))
+	if !strings.Contains(found, "[copy mode]") {
+		t.Fatalf("copy mode overlay disappeared during search:\n%s", found)
 	}
 
 	// V selects the current line, y copies it to the host clipboard and the
@@ -95,7 +137,7 @@ func TestCopyModeScrollbackAndClipboardIntegration(t *testing.T) {
 	if err := c.codec.Send(protocol.Input{Data: []byte("echo AFTER-COPY\n")}); err != nil {
 		t.Fatalf("type after copy: %v", err)
 	}
-	c.waitForFrame(func(f protocol.Frame) bool {
-		return strings.Contains(frameText(f), "AFTER-COPY")
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "AFTER-COPY")
 	})
 }
