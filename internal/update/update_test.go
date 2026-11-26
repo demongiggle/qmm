@@ -1,6 +1,9 @@
 package update
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
@@ -85,11 +88,14 @@ func TestTargetPlatform(t *testing.T) {
 func TestFindAsset(t *testing.T) {
 	assets := []asset{
 		{Name: "qmm_linux_amd64"},
-		{Name: "qmm_darwin_arm64"},
+		{Name: "qmm_darwin_arm64.tar.gz"},
 		{Name: "qmm_linux_amd64.tar.gz"},
 	}
-	if got, ok := findAsset(assets, "linux", "amd64"); !ok || got.Name != "qmm_linux_amd64" {
-		t.Fatalf("linux asset = %+v, %v", got, ok)
+	if got, ok := findAsset(assets, "linux", "amd64"); !ok || got.Name != "qmm_linux_amd64.tar.gz" {
+		t.Fatalf("linux asset = %+v, %v, want tar.gz", got, ok)
+	}
+	if got, ok := findAsset([]asset{{Name: "qmm_linux_amd64"}}, "linux", "amd64"); !ok || got.Name != "qmm_linux_amd64" {
+		t.Fatalf("raw fallback asset = %+v, %v", got, ok)
 	}
 	if _, ok := findAsset(assets, "windows", "amd64"); ok {
 		t.Fatal("found an asset that was not present")
@@ -147,14 +153,15 @@ func TestRunDownloadsAndReplacesExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	payload := makeTarball(t, "new binary")
 	var downloads atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/latest":
-			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/linux"},{"name":"qmm_linux_arm64","browser_download_url":"https://api.test/download/arm64"}]}`), nil
+			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/linux"},{"name":"qmm_linux_arm64.tar.gz","browser_download_url":"https://api.test/download/arm64"}]}`), nil
 		case "/download/linux":
 			downloads.Add(1)
-			response := fakeResponse(http.StatusOK, "new binary")
+			response := fakeResponseBytes(http.StatusOK, payload)
 			if request.Header.Get("User-Agent") != "qmm-update" {
 				t.Errorf("download User-Agent = %q", request.Header.Get("User-Agent"))
 			}
@@ -197,6 +204,35 @@ func TestRunDownloadsAndReplacesExecutable(t *testing.T) {
 	}
 }
 
+func TestRunDownloadsRawFallbackForOldReleases(t *testing.T) {
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "qmm")
+	if err := os.WriteFile(target, []byte("old binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/latest":
+			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/linux"}]}`), nil
+		case "/download/linux":
+			return fakeResponse(http.StatusOK, "new binary"), nil
+		default:
+			return fakeResponse(http.StatusNotFound, "not found"), nil
+		}
+	})}
+	var output strings.Builder
+	if err := Run(context.Background(), nil, testOptions(target, client, &output)); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "new binary" {
+		t.Fatalf("raw fallback content = %q", content)
+	}
+}
+
 func TestRunReplacesSymlinkTarget(t *testing.T) {
 	targetDir := t.TempDir()
 	real := filepath.Join(targetDir, "qmm-v0.6")
@@ -207,12 +243,13 @@ func TestRunReplacesSymlinkTarget(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
+	payload := makeTarball(t, "new binary")
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/latest":
-			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/linux"}]}`), nil
+			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/linux"}]}`), nil
 		case "/download/linux":
-			return fakeResponse(http.StatusOK, "new binary"), nil
+			return fakeResponseBytes(http.StatusOK, payload), nil
 		default:
 			return fakeResponse(http.StatusNotFound, "not found"), nil
 		}
@@ -281,8 +318,9 @@ func TestRunStableIgnoresPrerelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stable := `{"tag_name":"v1.3.3","prerelease":false,"assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/stable"}]}`
-	list := `[{"tag_name":"v1.3.4-rc.1","draft":false,"prerelease":true,"assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/rc"}]},` + stable + `]`
+	stable := `{"tag_name":"v1.3.3","prerelease":false,"assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/stable"}]}`
+	list := `[{"tag_name":"v1.3.4-rc.1","draft":false,"prerelease":true,"assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/rc"}]},` + stable + `]`
+	rcPayload := makeTarball(t, "rc binary")
 	var downloads atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
@@ -292,7 +330,7 @@ func TestRunStableIgnoresPrerelease(t *testing.T) {
 			return fakeResponse(http.StatusOK, list), nil
 		case "/download/rc":
 			downloads.Add(1)
-			return fakeResponse(http.StatusOK, "rc binary"), nil
+			return fakeResponseBytes(http.StatusOK, rcPayload), nil
 		default:
 			downloads.Add(1)
 			return fakeResponse(http.StatusNotFound, "not found"), nil
@@ -337,11 +375,12 @@ func TestRunPreSkipsDraftsAndPrefersNewestStable(t *testing.T) {
 	}
 
 	list := `[
-		{"tag_name":"v9.9.9","draft":true,"prerelease":false,"assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/draft"}]},
-		{"tag_name":"v1.3.4-rc.1","draft":false,"prerelease":true,"assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/rc"}]},
-		{"tag_name":"v1.3.4","draft":false,"prerelease":false,"assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/stable"}]},
-		{"tag_name":"v1.3.5-rc.1","draft":false,"prerelease":true,"assets":[{"name":"qmm_darwin_amd64","browser_download_url":"https://api.test/download/other-platform"}]}
+		{"tag_name":"v9.9.9","draft":true,"prerelease":false,"assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/draft"}]},
+		{"tag_name":"v1.3.4-rc.1","draft":false,"prerelease":true,"assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/rc"}]},
+		{"tag_name":"v1.3.4","draft":false,"prerelease":false,"assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/stable"}]},
+		{"tag_name":"v1.3.5-rc.1","draft":false,"prerelease":true,"assets":[{"name":"qmm_darwin_amd64.tar.gz","browser_download_url":"https://api.test/download/other-platform"}]}
 	]`
+	stablePayload := makeTarball(t, "stable binary")
 	var downloads atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
@@ -349,7 +388,7 @@ func TestRunPreSkipsDraftsAndPrefersNewestStable(t *testing.T) {
 			return fakeResponse(http.StatusOK, list), nil
 		case "/download/stable":
 			downloads.Add(1)
-			return fakeResponse(http.StatusOK, "stable binary"), nil
+			return fakeResponseBytes(http.StatusOK, stablePayload), nil
 		default:
 			downloads.Add(1)
 			return fakeResponse(http.StatusNotFound, "not found"), nil
@@ -381,17 +420,18 @@ func TestRunPreFollowsPagination(t *testing.T) {
 	if err := os.WriteFile(target, []byte("old binary"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	payload := makeTarball(t, "new binary")
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/releases":
 			if request.URL.Query().Get("page") == "2" {
-				return fakeResponse(http.StatusOK, `[{"tag_name":"v1.1.0","assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/new"}]}]`), nil
+				return fakeResponse(http.StatusOK, `[{"tag_name":"v1.1.0","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/new"}]}]`), nil
 			}
-			response := fakeResponse(http.StatusOK, `[{"tag_name":"v1.0.0","assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/old"}]}]`)
+			response := fakeResponse(http.StatusOK, `[{"tag_name":"v1.0.0","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/old"}]}]`)
 			response.Header.Set("Link", `<https://api.test/releases?page=2>; rel="next", <https://api.test/releases?page=3>; rel="last"`)
 			return response, nil
 		case "/download/new":
-			return fakeResponse(http.StatusOK, "new binary"), nil
+			return fakeResponseBytes(http.StatusOK, payload), nil
 		default:
 			return fakeResponse(http.StatusNotFound, "not found"), nil
 		}
@@ -436,9 +476,9 @@ func TestRunReportsMissingAssetAndBadRelease(t *testing.T) {
 		body    string
 		wantErr string
 	}{
-		{name: "no matching asset", body: `{"tag_name":"v0.7","assets":[{"name":"qmm_darwin_arm64","browser_download_url":"https://github.com/demongiggle/qmm/releases/download/v0.7/qmm_darwin_arm64"}]}`, wantErr: "no asset for linux/amd64"},
+		{name: "no matching asset", body: `{"tag_name":"v0.7","assets":[{"name":"qmm_darwin_arm64.tar.gz","browser_download_url":"https://github.com/demongiggle/qmm/releases/download/v0.7/qmm_darwin_arm64.tar.gz"}]}`, wantErr: "no asset for linux/amd64"},
 		{name: "unparseable tag", body: `{"tag_name":"nightly","assets":[]}`, wantErr: "unsupported version tag"},
-		{name: "missing download URL", body: `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64"}]}`, wantErr: "no download URL"},
+		{name: "missing download URL", body: `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64.tar.gz"}]}`, wantErr: "no download URL"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -468,10 +508,11 @@ func TestRunAgainstLocalHTTPServer(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	mux.HandleFunc("/latest", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"tag_name":"v0.9.0","assets":[{"name":"qmm_linux_amd64","browser_download_url":%q}]}`, server.URL+"/download")
+		fmt.Fprintf(w, `{"tag_name":"v0.9.0","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":%q}]}`, server.URL+"/download")
 	})
 	mux.HandleFunc("/download", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, "downloaded binary")
+		payload := makeTarball(t, "downloaded binary")
+		_, _ = w.Write(payload)
 	})
 
 	options := testOptions(target, server.Client(), nil)
@@ -505,7 +546,7 @@ func TestRunRejectsForeignDownloadURL(t *testing.T) {
 	var downloads atomic.Int32
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Path == "/latest" {
-			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64","browser_download_url":"http://example.com/qmm"}]}`), nil
+			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"http://example.com/qmm"}]}`), nil
 		}
 		downloads.Add(1)
 		return fakeResponse(http.StatusOK, "malicious binary"), nil
@@ -530,7 +571,7 @@ func TestRunRejectsEmptyDownload(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
 		case "/latest":
-			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64","browser_download_url":"https://api.test/download/empty"}]}`), nil
+			return fakeResponse(http.StatusOK, `{"tag_name":"v0.7","assets":[{"name":"qmm_linux_amd64.tar.gz","browser_download_url":"https://api.test/download/empty"}]}`), nil
 		default:
 			return fakeResponse(http.StatusOK, ""), nil
 		}
@@ -550,14 +591,14 @@ func TestRunRejectsEmptyDownload(t *testing.T) {
 }
 
 func TestValidateDownloadURL(t *testing.T) {
-	if err := validateDownloadURL("https://github.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64"); err != nil {
+	if err := validateDownloadURL("https://github.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64.tar.gz"); err != nil {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{
-		"http://github.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64",
-		"https://example.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64",
-		"https://github.com/other/repo/releases/download/v1.2.3/qmm_linux_amd64",
-		"https://user@github.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64",
+		"http://github.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64.tar.gz",
+		"https://example.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64.tar.gz",
+		"https://github.com/other/repo/releases/download/v1.2.3/qmm_linux_amd64.tar.gz",
+		"https://user@github.com/demongiggle/qmm/releases/download/v1.2.3/qmm_linux_amd64.tar.gz",
 	} {
 		if err := validateDownloadURL(raw); err == nil {
 			t.Fatalf("validateDownloadURL(%q) unexpectedly succeeded", raw)
@@ -588,4 +629,36 @@ func fakeResponse(status int, body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     make(http.Header),
 	}
+}
+
+func fakeResponseBytes(status int, body []byte) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Header:     make(http.Header),
+	}
+}
+
+// makeTarball builds a minimal qmm_<os>_<arch>.tar.gz payload containing a
+// single executable named qmm, matching scripts/build-all.sh output.
+func makeTarball(t *testing.T, content string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	writer := tar.NewWriter(gz)
+	data := []byte(content)
+	if err := writer.WriteHeader(&tar.Header{Name: "qmm", Mode: 0755, Size: int64(len(data))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

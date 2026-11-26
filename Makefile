@@ -50,9 +50,8 @@ install: build
 	install -d '$(DESTDIR)$(BINDIR)'
 	install -m 0755 '$(BINARY)' '$(DESTDIR)$(BINDIR)/$(INSTALL_NAME)'
 
-# Produce the qmm_<os>_<arch> raw assets consumed by `qmm update`,
-# plus qmm_<os>_<arch>.tar.gz (each with a single executable `qmm`)
-# and SHA256SUMS for manual installs (qcode-style layout).
+# Produce the qmm_<os>_<arch>.tar.gz assets consumed by `qmm update`
+# (each with a single executable `qmm`) plus SHA256SUMS for verification.
 release:
 	VERSION='$(VERSION)' OUT_DIR='$(OUT_DIR)' GO='$(GO)' ./scripts/build-all.sh
 

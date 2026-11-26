@@ -61,11 +61,10 @@ qmm
 `$(go env GOPATH)/bin`), so make sure that directory is on your `PATH`. To
 install a checkout instead, run `go install ./cmd/qmm`.
 
-Prebuilt releases ship `qmm_<os>_<arch>.tar.gz` (plus `SHA256SUMS`)
-and raw `qmm_<os>_<arch>` binaries. For a manual install, download the
-tarball for your platform, verify it, and put the extracted `qmm` on your
-`PATH` — the tar preserves the executable bit that GitHub strips from raw
-downloads:
+Prebuilt releases ship `qmm_<os>_<arch>.tar.gz` (plus `SHA256SUMS`).
+For a manual install, download the tarball for your platform, verify it,
+and put the extracted `qmm` on your `PATH` — the tar preserves the
+executable bit:
 
 ```sh
 curl -LO https://github.com/demongiggle/qmm/releases/download/v0.1.0/qmm_linux_amd64.tar.gz
@@ -76,9 +75,7 @@ tar xzf qmm_linux_amd64.tar.gz
 ```
 
 Once on your `PATH`, it can keep itself current with `qmm update`; see
-[Staying up to date](#staying-up-to-date). `qmm update` downloads the raw
-`qmm_<os>_<arch>` asset and applies the executable bit itself, so self-update
-is unaffected.
+[Staying up to date](#staying-up-to-date).
 
 Prefer building locally?
 
@@ -116,8 +113,9 @@ qmm update --help
 ```
 
 `qmm update` reads the latest GitHub release, compares its tag with the
-running binary's version, and downloads the `qmm_<os>_<arch>` asset for this
-platform. The download URL must be an HTTPS
+running binary's version, and downloads the `qmm_<os>_<arch>.tar.gz` asset
+for this platform. It extracts the single `qmm` executable inside and
+installs it beside the running binary with an atomic rename. The download URL must be an HTTPS
 `github.com/demongiggle/qmm/releases/download/...` URL; the new binary is
 written beside the executable and moved into place with an atomic rename. If
 the installed version is already current or newer, nothing is downloaded.

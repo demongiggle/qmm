@@ -1,9 +1,11 @@
 // Package update implements qmm's self-update command. It checks GitHub
-// releases for a newer binary, downloads the asset matching the host platform,
-// and atomically replaces the running executable.
+// releases for a newer tarball, extracts the executable, and atomically
+// replaces the running binary.
 package update
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -152,7 +154,7 @@ func Run(ctx context.Context, arguments []string, options Options) error {
 	if err != nil {
 		return err
 	}
-	temporary, err := downloadAsset(ctx, options.Client, targetAsset.BrowserDownloadURL, filepath.Dir(target), mode, validator)
+	temporary, err := downloadAsset(ctx, options.Client, targetAsset.BrowserDownloadURL, filepath.Dir(target), mode, validator, targetAsset.Name)
 	if err != nil {
 		return err
 	}
@@ -354,9 +356,16 @@ func nextPageURL(header string) string {
 }
 
 func findAsset(assets []asset, goos, goarch string) (asset, bool) {
-	wanted := fmt.Sprintf("qmm_%s_%s", goos, goarch)
+	wantedTar := fmt.Sprintf("qmm_%s_%s.tar.gz", goos, goarch)
 	for _, candidate := range assets {
-		if candidate.Name == wanted {
+		if candidate.Name == wantedTar {
+			return candidate, true
+		}
+	}
+	// Backward compatibility with pre-tar releases (e.g. v0.1.0 raw assets).
+	wantedRaw := fmt.Sprintf("qmm_%s_%s", goos, goarch)
+	for _, candidate := range assets {
+		if candidate.Name == wantedRaw {
 			return candidate, true
 		}
 	}
@@ -407,7 +416,7 @@ func executableTarget(path string) (executable, target string, mode os.FileMode,
 	return executable, target, mode, nil
 }
 
-func downloadAsset(ctx context.Context, client *http.Client, rawURL, directory string, mode os.FileMode, validator func(string) error) (path string, err error) {
+func downloadAsset(ctx context.Context, client *http.Client, rawURL, directory string, mode os.FileMode, validator func(string) error, assetName string) (path string, err error) {
 	if validator == nil {
 		validator = validateDownloadURL
 	}
@@ -430,7 +439,12 @@ func downloadAsset(ctx context.Context, client *http.Client, rawURL, directory s
 		return "", fmt.Errorf("download update: GitHub returned %s: %s", response.Status, strings.TrimSpace(string(message)))
 	}
 
-	temporaryFile, err := os.CreateTemp(directory, ".qmm-update-*")
+	isTarball := strings.HasSuffix(assetName, ".tar.gz") || strings.HasSuffix(rawURL, ".tar.gz")
+	pattern := ".qmm-update-*"
+	if isTarball {
+		pattern = ".qmm-update-*.tar.gz"
+	}
+	temporaryFile, err := os.CreateTemp(directory, pattern)
 	if err != nil {
 		return "", fmt.Errorf("create update temporary file: %w", err)
 	}
@@ -455,10 +469,6 @@ func downloadAsset(ctx context.Context, client *http.Client, rawURL, directory s
 		temporaryFile.Close()
 		return "", fmt.Errorf("downloaded update exceeds %d bytes", maxUpdateSize)
 	}
-	if err = temporaryFile.Chmod(mode); err != nil {
-		temporaryFile.Close()
-		return "", fmt.Errorf("set update permissions: %w", err)
-	}
 	if err = temporaryFile.Sync(); err != nil {
 		temporaryFile.Close()
 		return "", fmt.Errorf("sync update temporary file: %w", err)
@@ -466,7 +476,127 @@ func downloadAsset(ctx context.Context, client *http.Client, rawURL, directory s
 	if err = temporaryFile.Close(); err != nil {
 		return "", fmt.Errorf("close update temporary file: %w", err)
 	}
-	return path, nil
+
+	if !isTarball {
+		if err = os.Chmod(path, mode); err != nil {
+			return "", fmt.Errorf("set update permissions: %w", err)
+		}
+		return path, nil
+	}
+
+	extracted, extractErr := extractTarballBinary(path, directory, mode)
+	_ = os.Remove(path)
+	if extractErr != nil {
+		return "", extractErr
+	}
+	// downloadAsset's caller removes the returned path on failure via
+	// temporaryPath; re-point cleanup to the extracted binary.
+	temporaryPath = extracted
+	err = nil
+	return extracted, nil
+}
+
+// extractTarballBinary extracts the single `qmm` executable from a
+// qmm_<os>_<arch>.tar.gz asset into directory, applies mode, and returns its
+// path. The tarball must contain exactly one regular file (named `qmm` in new
+// releases); path traversal entries are rejected.
+func extractTarballBinary(tarballPath, directory string, mode os.FileMode) (string, error) {
+	file, err := os.Open(tarballPath)
+	if err != nil {
+		return "", fmt.Errorf("open update archive: %w", err)
+	}
+	defer file.Close()
+	gz, err := gzip.NewReader(io.LimitReader(file, maxUpdateSize+1))
+	if err != nil {
+		return "", fmt.Errorf("decode update archive: %w", err)
+	}
+	defer gz.Close()
+	reader := tar.NewReader(gz)
+
+	var extracted string
+	var seenRegular bool
+	for {
+		header, nextErr := reader.Next()
+		if nextErr == io.EOF {
+			break
+		}
+		if nextErr != nil {
+			if extracted != "" {
+				_ = os.Remove(extracted)
+			}
+			return "", fmt.Errorf("read update archive: %w", nextErr)
+		}
+		if !header.FileInfo().Mode().IsRegular() {
+			continue
+		}
+		// Reject absolute paths, parent traversal, and subdirectories.
+		name := filepath.Clean(header.Name)
+		if filepath.IsAbs(name) || strings.HasPrefix(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			if extracted != "" {
+				_ = os.Remove(extracted)
+			}
+			return "", fmt.Errorf("update archive contains unsafe path %q", header.Name)
+		}
+		if seenRegular {
+			if extracted != "" {
+				_ = os.Remove(extracted)
+			}
+			return "", fmt.Errorf("update archive contains more than one file")
+		}
+		seenRegular = true
+
+		out, createErr := os.CreateTemp(directory, ".qmm-update-*")
+		if createErr != nil {
+			return "", fmt.Errorf("create update temporary file: %w", createErr)
+		}
+		extracted = out.Name()
+		if _, copyErr := io.Copy(out, io.LimitReader(reader, maxUpdateSize+1)); copyErr != nil {
+			out.Close()
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", fmt.Errorf("extract update archive: %w", copyErr)
+		}
+		if info, statErr := out.Stat(); statErr != nil {
+			out.Close()
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", fmt.Errorf("inspect update temporary file: %w", statErr)
+		} else if info.Size() == 0 {
+			out.Close()
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", errors.New("downloaded update is empty")
+		} else if info.Size() > maxUpdateSize {
+			out.Close()
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", fmt.Errorf("downloaded update exceeds %d bytes", maxUpdateSize)
+		}
+		if chmodErr := out.Chmod(mode); chmodErr != nil {
+			out.Close()
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", fmt.Errorf("set update permissions: %w", chmodErr)
+		}
+		if syncErr := out.Sync(); syncErr != nil {
+			out.Close()
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", fmt.Errorf("sync update temporary file: %w", syncErr)
+		}
+		if closeErr := out.Close(); closeErr != nil {
+			_ = os.Remove(extracted)
+			extracted = ""
+			return "", fmt.Errorf("close update temporary file: %w", closeErr)
+		}
+	}
+	if !seenRegular {
+		if extracted != "" {
+			_ = os.Remove(extracted)
+		}
+		return "", errors.New("update archive contains no executable")
+	}
+	return extracted, nil
 }
 
 // installUnix replaces the executable with an atomic rename. Renaming over a

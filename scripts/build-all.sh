@@ -1,10 +1,8 @@
 #!/bin/sh
-# Build the release binaries uploaded to a GitHub release. Raw assets
-# qmm_<goos>_<goarch> are consumed by `qmm update` (see internal/update.findAsset).
-# Each binary is also packaged as qmm_<goos>_<goarch>.tar.gz containing a single
-# executable `qmm` (preserving the executable bit for manual downloads, which
-# lose the mode on raw GitHub assets), plus SHA256SUMS of the tarballs.
-# Layout mirrors ../qcode's dist/ (raw + tar.gz + SHA256SUMS).
+# Build the tar-only release assets uploaded to a GitHub release.
+# `qmm update` consumes qmm_<goos>_<arch>.tar.gz (see internal/update.findAsset);
+# each tarball contains a single executable `qmm` with the executable bit intact
+# (raw GitHub downloads lose the mode). SHA256SUMS covers the tarballs.
 set -eu
 
 version=${VERSION:-$(sh ./scripts/version.sh)}
@@ -28,9 +26,10 @@ build darwin amd64
 build darwin arm64
 build freebsd amd64
 
-# Package each raw binary as a tarball containing a single `qmm` executable.
-# Staging through a temp dir gives the inner file the plain `qmm` name (like
-# qcode's tarballs) with the executable bit intact.
+# Package each binary as a tarball containing a single `qmm` executable.
+# Staging through a temp dir gives the inner file the plain `qmm` name with
+# the executable bit intact. Raw binaries are removed afterwards: releases
+# ship only *.tar.gz + SHA256SUMS.
 package() {
 	os=$1
 	arch=$2
@@ -39,7 +38,7 @@ package() {
 	cp "$out/$name" "$tmp/qmm"
 	chmod 755 "$tmp/qmm"
 	tar -czf "$out/${name}.tar.gz" -C "$tmp" qmm
-	rm -rf "$tmp"
+	rm -rf "$tmp" "$out/$name"
 	printf 'packaged %s.tar.gz\n' "$name"
 }
 
@@ -49,6 +48,6 @@ package darwin amd64
 package darwin arm64
 package freebsd amd64
 
-# Checksums of the tarballs for manual verification (qcode-style SHA256SUMS).
+# Checksums of the tarballs for manual verification.
 (cd "$out" && sha256sum qmm_*.tar.gz > SHA256SUMS)
 printf 'wrote %s/SHA256SUMS\n' "$out"
