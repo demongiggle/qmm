@@ -27,6 +27,7 @@ func TestRoundTrip(t *testing.T) {
 		ActionDragStart{Splitter: 7},
 		ActionDragUpdate{Splitter: 7, Delta: -2},
 		ActionDragEnd{Splitter: 7},
+		ActionWheel{Delta: -3},
 		Welcome{Cols: 120, Rows: 40},
 		Frame{
 			Full: true, Cols: 2, Rows: 1,
@@ -41,6 +42,7 @@ func TestRoundTrip(t *testing.T) {
 			Tabs:      []Tab{{Index: 0, Start: 0, End: 5, Name: "bash", Active: true, Zoomed: true}},
 		},
 		Notice{Text: "hello"},
+		Clipboard{Text: "copied text\nsecond line"},
 		Goodbye{Reason: "detached"},
 	}
 

@@ -72,6 +72,10 @@ type Server struct {
 	needFull bool
 	comp     compositor
 
+	// pasteBuffer is the session's most recent copy. prefix+] writes it into
+	// the active pane, like tmux's default paste buffer.
+	pasteBuffer string
+
 	// shutdownRequested is set by the confirmed prefix+& chord; Run performs
 	// the actual teardown after the current message is handled.
 	shutdownRequested bool
@@ -107,6 +111,10 @@ type clientConn struct {
 
 	// Shutdown confirmation is local to the client that pressed prefix+&.
 	confirmOpen bool
+
+	// prefix+[ opens copy mode: a per-client, vim-keyed view of the active
+	// pane's scrollback with an optional selection.
+	copyMode *copyModeState
 
 	// Config recovery warnings are local. A startup warning is shown once to
 	// the first attached client; runtime failures target their triggering
@@ -452,6 +460,7 @@ func (s *Server) broadcast() {
 		c.comp.settingsOpen = c.settingsOpen
 		c.comp.settingsCursor = c.settingsCursor
 		c.comp.settingsTop = c.settingsTop
+		c.comp.copyMode = c.copyMode
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
 		c.forceFull = false
 		c.helpTop = c.comp.helpTop

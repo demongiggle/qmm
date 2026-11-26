@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/base64"
 	"os"
 	"sync"
 
@@ -14,24 +15,62 @@ var (
 	syncOutEnd   = []byte("\x1b[?2026l")
 )
 
+// screenHandle bundles the tcell screen with the tty it writes to. Copy mode
+// uses the same tty (and the same write lock) to emit OSC 52 clipboard
+// sequences, so a frame can never be split in the middle by an escape.
+type screenHandle struct {
+	tcell.Screen
+	tty tcell.Tty
+}
+
 // newScreen creates a tcell screen whose tty strips tcell's unconditional
 // per-frame DEC mode 2026 synchronized-output wrapper as well as redundant
 // cursor hide/show and DECSCUSR sequences. Both mode 2026 (e.g. in WezTerm on
 // WSL2) and per-redraw hide/show toggles can cause a steady native cursor to
 // visibly blink on every screen update.
-func newScreen() (tcell.Screen, error) {
+func newScreen() (*screenHandle, error) {
 	if term := os.Getenv("TERM"); term != "" {
 		if ti, err := tcell.LookupTerminfo(term); err == nil {
 			if devTty, err := tcell.NewDevTty(); err == nil {
 				tty := newSteadyCursorTty(devTty, ti)
 				if s, err := tcell.NewTerminfoScreenFromTtyTerminfo(tty, ti); err == nil {
-					return s, nil
+					return &screenHandle{Screen: s, tty: tty}, nil
 				}
 				_ = devTty.Close()
 			}
 		}
 	}
-	return tcell.NewScreen()
+	s, err := tcell.NewScreen()
+	if err != nil {
+		return nil, err
+	}
+	return &screenHandle{Screen: s}, nil
+}
+
+// writeClipboard puts text in the host terminal's clipboard using OSC 52.
+// The payload is base64 encoded, so arbitrary (including non-ASCII) text is
+// safe to send as one escape sequence. Terminals that do not implement OSC 52
+// ignore the sequence; qmm's own paste buffer still works everywhere.
+func (h *screenHandle) writeClipboard(text string) error {
+	seq := []byte("\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x07")
+	if h.tty != nil {
+		if raw, ok := h.tty.(interface {
+			WriteRaw([]byte) (int, error)
+		}); ok {
+			_, err := raw.WriteRaw(seq)
+			return err
+		}
+		_, err := h.tty.Write(seq)
+		return err
+	}
+	// Fallback path (tcell.NewScreen): write to the controlling terminal.
+	f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(seq)
+	return err
 }
 
 // steadyCursorTty wraps a tcell.Tty to track the host terminal's cursor
@@ -74,6 +113,15 @@ func (w *steadyCursorTty) Stop() error {
 	w.dropSyncEnd = false
 	w.mu.Unlock()
 	return w.Tty.Stop()
+}
+
+// WriteRaw sends a standalone control sequence to the terminal without the
+// per-frame cursor filter. It shares the same lock as Write, so an OSC 52
+// clipboard sequence can never be interleaved with a partially written frame.
+func (w *steadyCursorTty) WriteRaw(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.Tty.Write(p)
 }
 
 func (w *steadyCursorTty) Write(p []byte) (int, error) {

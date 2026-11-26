@@ -21,8 +21,9 @@ demand, and an interactive settings page when you want to tune the experience.
 It is an early, deliberately small implementation focused on the essentials.
 
 [Quick start](#quick-start) · [Why qmm](#why-qmm) ·
-[Keyboard and mouse](#keyboard-and-mouse) · [Under the hood](#under-the-hood) ·
-[Current scope](#current-scope)
+[Keyboard and mouse](#keyboard-and-mouse) ·
+[Copy mode](#scrollback-and-vim-style-copy-mode) ·
+[Under the hood](#under-the-hood) · [Current scope](#current-scope)
 
 ## Why qmm?
 
@@ -34,6 +35,7 @@ It is an early, deliberately small implementation focused on the essentials.
 | **Navigation without a detour** | `Ctrl-a` `o` cycles panes, `Ctrl-a` `q` overlays large pane numbers for instant jumps, and `Ctrl-a` `Ctrl-a` sends a literal Ctrl-a to the application. |
 | **Mouse-ready, keyboard-complete** | Click to focus, double-click to zoom, click a status-bar tab to switch windows, or drag a divider to resize. Every core action also has a keyboard path. |
 | **Focus without losing the big picture** | Floating zoom lifts the active pane above the split layout, centered with at least a 2% margin. Toggle it again and the original layout returns. |
+| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback; select with `v` / `V`, copy with `y` to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
 | **Terminal color that stays true** | Pane output preserves ANSI 16-color, 256-color, and 24-bit RGB styling, while active borders, window tabs, and help are color-coded for quick orientation. |
 | **Guidance, tuning, and a safety net** | Categorized help, a scrollable settings page, and an optional y/n confirmation before shutdown keep powerful actions discoverable and deliberate. |
 | **One view, multiple terminals** | Multiple clients can attach to the same session. Like tmux, the effective terminal size follows the smallest attached client. |
@@ -124,7 +126,8 @@ The command prefix is `Ctrl-a`: press and release it, then press the next key.
 2. Create another workspace with `Ctrl-a` `c`; switch with `Ctrl-a` `n` / `p`.
 3. Press `Ctrl-a` `q`, then a pane number, to jump straight there.
 4. Press `Ctrl-a` `z` (or double-click) to float and restore the active pane.
-5. Press `Ctrl-a` `d`, close the terminal, then run `qmm attach`.
+5. Press `Ctrl-a` `[`, move with `h/j/k/l`, then `v` and `y` to copy text.
+6. Press `Ctrl-a` `d`, close the terminal, then run `qmm attach`.
 
 Your shells, windows, and layout are still there.
 
@@ -142,6 +145,8 @@ Your shells, windows, and layout are still there.
 | `Ctrl-a` `x` | Close current pane |
 | `Ctrl-a` `&` | Shut down session (confirm) |
 | `Ctrl-a` `z` | Toggle floating pane zoom |
+| `Ctrl-a` `[` | Enter scrollback / copy mode |
+| `Ctrl-a` `]` | Paste the last copied text |
 | `Ctrl-a` `d` | Detach; the session keeps running |
 | `Ctrl-a` `Ctrl-←/→/↑/↓` | Resize pane (repeatable) |
 | `Ctrl-a` `Ctrl-a` | Send a literal `Ctrl-a` to the app |
@@ -205,13 +210,46 @@ settings page. If the file is broken, qmm backs it up as
 in `server.log`, and shows a one-time warning dialog on the first attached
 client.
 
+### Scrollback and vim-style copy mode
+
+`Ctrl-a` `[` opens copy mode, a full-screen view of the active pane's
+scrollback (2,000 lines per pane) plus its current screen. Movement is
+vim-style, and the overlay belongs only to the attached client that opened it —
+other clients keep using the pane as usual.
+
+| Key | Action |
+| :--- | :--- |
+| `h` / `j` / `k` / `l`, arrows | Move by character / line |
+| `w` / `b` / `e` | Next word / previous word / word end |
+| `0` / `^` / `$` | Line start / first non-blank / line end |
+| `g` `g`, `G` | First line / last line (`15G` jumps to line 15) |
+| `H` / `M` / `L` | Top / middle / bottom of the visible page |
+| `Ctrl-u` / `Ctrl-d`, `Ctrl-b` / `Ctrl-f`, `PgUp` / `PgDn` | Half / full page |
+| `/` / `?`, `n` / `N` | Search forward / backward, repeat / reverse |
+| `v` / `V` / `Ctrl-v` | Character / line / rectangle selection |
+| `y`, Enter | Copy the selection and leave copy mode |
+| `q`, `Esc`, `Ctrl-c` | Leave copy mode without copying |
+
+Motions accept a numeric prefix (`10j`, `3w`), and the view follows the
+cursor. `y` with no active selection copies the current line. Copied text goes
+to the host terminal's clipboard through an OSC 52 escape sequence (supported
+by xterm, iTerm2, WezTerm, kitty, and others) and is also kept in qmm's paste
+buffer, so `Ctrl-a` `]` types it into the active pane even on terminals that
+ignore OSC 52. Clipboard payloads are capped at 64 KiB.
+
+Scrollback is line-oriented: ordinary shell output is captured as it scrolls
+off the top, while alternate-screen applications (vim, less, top) are not
+added to the history. The mouse wheel scrolls copy mode; wheel-up enters it
+from a live pane and wheel-down at the bottom closes it.
+
 ### Mouse shortcuts
 
 Click a pane to focus it; double-click a pane to float it above the split as a
 centered zoom overlay, or double-click the floating pane to restore the
 layout. Click a window name in the status bar to switch windows, and drag a
-border between panes to resize live. The mouse wheel scrolls nothing because
-scrollback is not implemented yet.
+border between panes to resize live. Scrolling the wheel enters copy mode and
+moves through the active pane's scrollback; see
+[Scrollback and vim-style copy mode](#scrollback-and-vim-style-copy-mode).
 
 ### Deliberate shutdown
 
@@ -234,8 +272,8 @@ qmm (client)  ──gob over unix socket──▶  qmm server (detached daemon)
 
 - `cmd/qmm` — CLI: spawn/attach, `kill-server`, and `update`
 - `internal/client` — tcell front-end: draws frames, encodes keys and mouse
-- `internal/server` — session daemon: pane/PTY management, layout, screen
-  compositor, and prefix-key state machine
+- `internal/server` — session daemon: pane/PTY management, scrollback, layout,
+  screen compositor, copy mode, and prefix-key state machine
 - `internal/update` — GitHub release lookup, semver comparison, download, and
   atomic self-replacement
 - `internal/layout` — binary split tree with rectangle math, hit-testing, and
@@ -297,6 +335,11 @@ QMM_SOCKET_DIR=$(mktemp -d) script -qec ./qmm /tmp/qmm.log
 - [ ] `Ctrl-a c` opens and focuses a window; `Ctrl-a n` / `p` switch; status bar updates
 - [ ] type in a pane, `Ctrl-a d` detaches, `qmm attach` restores with the pane intact
 - [ ] `Ctrl-a ?` opens the categorized help menu; `Esc` / `q` closes it; pane input resumes
+- [ ] `Ctrl-a [` shows scrollback after `seq 1 50`; `h/j/k/l`, `w/b`, `gg/G`, `Ctrl-u/Ctrl-d`, and `/search` move the cursor
+- [ ] `v` / `V` / `Ctrl-v` highlight a selection; `y` copies it, `q` quits without copying
+- [ ] after `y`, the host paste shortcut pastes the text in another app (OSC 52); `Ctrl-a ]` types it back into the pane
+- [ ] wheel-up enters copy mode from a live pane; wheel-down at the bottom closes it
+- [ ] copy mode on one attached client does not cover the other client's screen
 - [ ] `Ctrl-a s` opens categorized settings; arrows scroll, `←` / `→` changes a value, and `r` / `Ctrl-r` reloads the config
 - [ ] settings page shows **Cursor shape** and **Cursor blink**; Block / Underline / Bar and blink On / Off change the host terminal's native cursor
 - [ ] settings changes survive a server restart; external TOML edits take effect after `r` / `Ctrl-r` and update all attached clients
@@ -321,9 +364,8 @@ qmm is early and intentionally focused. It currently offers **one unnamed
 session** and:
 
 - Runs on Linux only
-- Has no scrollback or copy mode
+- Has line-oriented scrollback; alternate-screen history is not captured
 - Has a small persisted TOML config file, but no plugins or full theming
-- Has no window renaming or reordering
 - Has no window renaming or reordering
 
 That focus is the point: a compact Go codebase, a single binary, and a

@@ -59,6 +59,14 @@ var helpSections = []helpSection{
 		},
 	},
 	{
+		Title: "Copy mode",
+		Items: []helpItem{
+			{"C-a [", "Scrollback / copy"},
+			{"C-a ]", "Paste copied text"},
+			{"Wheel up", "Scroll / enter copy"},
+		},
+	},
+	{
 		Title: "Mouse (no prefix)",
 		Items: []helpItem{
 			{"Click", "Focus pane"},

@@ -327,6 +327,17 @@ func (a *attach) statusRow() int {
 
 func (a *attach) handleMouse(ev *tcell.EventMouse) {
 	x, y := ev.Position()
+	// Wheel steps are copy-mode scroll commands. Wheel-up also enters copy
+	// mode when the pane is live, matching tmux.
+	buttons := ev.Buttons()
+	if buttons&tcell.WheelUp != 0 {
+		_ = a.codec.Send(protocol.ActionWheel{Delta: -1})
+		return
+	}
+	if buttons&tcell.WheelDown != 0 {
+		_ = a.codec.Send(protocol.ActionWheel{Delta: 1})
+		return
+	}
 	// Ignore input outside the server-rendered area (e.g. when this
 	// terminal is bigger than the effective session size). A press there
 	// can never start a gesture; a release ends one.

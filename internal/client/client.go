@@ -132,6 +132,10 @@ func Attach(socketPath string) error {
 				}
 			case protocol.Notice:
 				screen.Beep()
+			case protocol.Clipboard:
+				// Best effort: an unsupported OSC 52 terminal simply keeps its
+				// old clipboard. qmm's internal paste buffer is set server-side.
+				_ = screen.writeClipboard(m.Text)
 			case protocol.Goodbye:
 				reason = m.Reason
 			}

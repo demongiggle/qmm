@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/demongiggle/qmm/internal/layout"
+	"github.com/demongiggle/qmm/internal/protocol"
 )
 
 const (
@@ -30,6 +32,7 @@ type pane struct {
 	cmd       *exec.Cmd
 	ptmx      *os.File
 	vt        vt10x.Terminal
+	sb        *scrollback
 	closeOnce sync.Once
 }
 
@@ -171,6 +174,7 @@ func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
 		cmd:  cmd,
 		ptmx: ptmx,
 		vt:   vt10x.New(vt10x.WithSize(cols, rows)),
+		sb:   newScrollback(cols, rows),
 	}
 	s.panes[id] = p
 	go p.readLoop(s.exitCh, s.onOutput)
@@ -193,12 +197,21 @@ func (p *pane) notifyExit(ch chan int) {
 }
 
 func (p *pane) readLoop(exitCh chan int, onOutput func()) {
-	br := bufio.NewReaderSize(p.ptmx, 32*1024)
+	// Tee the raw PTY bytes into the scrollback recorder while vt10x parses
+	// them. The recorder only models line scrolling; the copy-mode buffer gets
+	// its visible rows directly from vt10x below.
+	br := bufio.NewReaderSize(io.TeeReader(p.ptmx, p.sb), 32*1024)
 	for {
 		if err := p.vt.Parse(br); err != nil {
 			p.notifyExit(exitCh)
 			return
 		}
+		// Resync the recorder with vt10x after every parsed chunk. The
+		// recorder only needs to notice lines that scroll off; starting each
+		// chunk from the real screen keeps uncommon escape sequences from
+		// accumulating drift.
+		lines, cx, cy := p.vtSnapshot()
+		p.sb.SetScreen(lines, cx, cy)
 		// Drain the entire buffered PTY chunk before scheduling a render so
 		// applications that hide/redraw/show the cursor in one write (such
 		// as watch or ncurses) don't emit intermediate cursor-hidden frames.
@@ -302,6 +315,64 @@ func resizePane(p *pane, cols, rows int) {
 		_ = pty.Setsize(p.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	}
 	p.vt.Resize(cols, rows)
+	if p.sb != nil {
+		p.sb.Resize(cols, rows)
+	}
+}
+
+// vtSnapshot copies the pane's current vt10x screen and cursor position.
+func (p *pane) vtSnapshot() ([]copyLine, int, int) {
+	p.vt.Lock()
+	defer p.vt.Unlock()
+	cols, rows := p.vt.Size()
+	cur := p.vt.Cursor()
+	out := make([]copyLine, rows)
+	for y := 0; y < rows; y++ {
+		line := make([]copyCell, cols)
+		for x := 0; x < cols; x++ {
+			g := p.vt.Cell(x, y)
+			ch := g.Char
+			if ch == 0 {
+				ch = ' '
+			}
+			var st uint8
+			if g.Mode&gttrBold != 0 {
+				st |= protocol.StyleBold
+			}
+			if g.Mode&gttrItalic != 0 {
+				st |= protocol.StyleItalic
+			}
+			if g.Mode&gttrUnderline != 0 {
+				st |= protocol.StyleUnderline
+			}
+			if g.Mode&gttrBlink != 0 {
+				st |= protocol.StyleBlink
+			}
+			if g.Mode&gttrReverse != 0 {
+				st |= protocol.StyleReverse
+			}
+			line[x] = copyCell{Ch: ch, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
+		}
+		out[y] = copyLine{cells: line}
+	}
+	return out, cur.X, cur.Y
+}
+
+func (p *pane) visibleLines() []copyLine {
+	lines, _, _ := p.vtSnapshot()
+	return lines
+}
+
+// copyBuffer returns scrollback plus the live screen, oldest line first.
+func (p *pane) copyBuffer() []copyLine {
+	if p == nil {
+		return nil
+	}
+	lines := []copyLine{}
+	if p.sb != nil {
+		lines = append(lines, p.sb.History()...)
+	}
+	return append(lines, p.visibleLines()...)
 }
 
 // activePane returns the active pane of the active window, or nil.

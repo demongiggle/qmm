@@ -136,6 +136,13 @@ type ActionDragEnd struct {
 	Splitter int
 }
 
+// ActionWheel reports a mouse wheel step. Delta is negative for wheel-up
+// (towards older scrollback) and positive for wheel-down. The server uses it
+// to scroll copy mode, or to enter copy mode on the first wheel-up.
+type ActionWheel struct {
+	Delta int
+}
+
 // ---------------------------------------------------------------------------
 // server -> client messages
 // ---------------------------------------------------------------------------
@@ -207,6 +214,12 @@ type Notice struct {
 	Text string
 }
 
+// Clipboard asks the client to put Text in the host terminal's clipboard via
+// OSC 52. It is sent only to the client that made the copy selection.
+type Clipboard struct {
+	Text string
+}
+
 // Goodbye is sent before the server closes the connection.
 type Goodbye struct {
 	Reason string
@@ -232,10 +245,12 @@ func init() {
 	gob.Register(ActionDragStart{})
 	gob.Register(ActionDragUpdate{})
 	gob.Register(ActionDragEnd{})
+	gob.Register(ActionWheel{})
 
 	gob.Register(Welcome{})
 	gob.Register(Frame{})
 	gob.Register(Notice{})
+	gob.Register(Clipboard{})
 	gob.Register(Goodbye{})
 }
 
@@ -312,11 +327,15 @@ func derefMessage(msg interface{}) interface{} {
 		return *m
 	case *ActionDragEnd:
 		return *m
+	case *ActionWheel:
+		return *m
 	case *Welcome:
 		return *m
 	case *Frame:
 		return *m
 	case *Notice:
+		return *m
+	case *Clipboard:
 		return *m
 	case *Goodbye:
 		return *m

@@ -71,6 +71,8 @@ type compositor struct {
 	settingsOpen   bool
 	settingsCursor int
 	settingsTop    int
+
+	copyMode *copyModeState
 }
 
 func blankCell(row, col int) protocol.Cell {
@@ -106,7 +108,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		paneNumbers[id] = n
 	}
 	render := func() protocol.Frame {
-		if c.configWarningOpen {
+		if c.copyMode != nil && c.copyMode.open {
+			c.drawCopyMode(&frame, setCell, cols, rows, c.copyMode)
+		} else if c.configWarningOpen {
 			c.drawConfigWarning(&frame, setCell, cols, rows, c.configWarning)
 		} else if c.confirmOpen {
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)

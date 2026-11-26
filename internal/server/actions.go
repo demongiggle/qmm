@@ -34,6 +34,16 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
+	// Copy mode is a full-screen modal: input, resize, wheel and lifecycle
+	// messages reach it, but mouse gestures and pane actions are swallowed so
+	// they cannot change the session while the user is selecting text.
+	if c.copyMode != nil && c.copyMode.open {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane, protocol.ActionWheel:
+		default:
+			return false
+		}
+	}
 	// While the shutdown dialog is open, only lifecycle and input messages
 	// are handled. Mouse/action messages are swallowed rather than changing
 	// the session underneath the pending decision.
@@ -90,6 +100,7 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		if s.recomputeSize() {
 			s.relayout()
 			s.needFull = true
+			s.resizeCopyModes()
 		}
 		s.broadcast()
 	case protocol.Detach:
@@ -129,6 +140,8 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		s.dragUpdate(c, msg.Splitter, msg.Delta)
 	case protocol.ActionDragEnd:
 		c.dragActive = false
+	case protocol.ActionWheel:
+		s.handleWheel(c, msg.Delta)
 	case forceKillPane:
 		if p, ok := s.sess.panes[msg.paneID]; ok {
 			_ = p.ptmx.Close()
@@ -163,6 +176,7 @@ func (s *Server) detachClient(c *clientConn, reason string) {
 	if s.recomputeSize() {
 		s.relayout()
 		s.needFull = true
+		s.resizeCopyModes()
 	}
 	s.broadcast()
 }
@@ -177,6 +191,7 @@ func (s *Server) dropClient(c *clientConn) {
 	if s.recomputeSize() {
 		s.relayout()
 		s.needFull = true
+		s.resizeCopyModes()
 	}
 	s.broadcast()
 }
@@ -422,6 +437,10 @@ var prefixBindings = []prefixBinding{
 	prefixBind("o", func(s *Server, c *clientConn) { s.cyclePane() }),
 	// tmux-style display-panes: number every pane, then accept the number.
 	prefixBind("q", func(s *Server, c *clientConn) { s.openDisplayPanes(c) }),
+	// tmux-style copy mode: prefix+[ enters a vim-keyed scrollback view;
+	// prefix+] writes the last copied selection into the active pane.
+	prefixBind("[", func(s *Server, c *clientConn) { s.openCopyMode(c, 0) }),
+	prefixBind("]", func(s *Server, c *clientConn) { s.pasteClipboard(c) }),
 	// Categorized, scrollable session settings.
 	prefixBind("s", func(s *Server, c *clientConn) { s.openSettings(c) }),
 	prefixBind("z", func(s *Server, c *clientConn) { s.toggleZoom() }),
@@ -449,6 +468,11 @@ func (s *Server) writeRaw(c *clientConn, data []byte) {
 }
 
 func (s *Server) handleInput(c *clientConn, data []byte) {
+	if c.copyMode != nil && c.copyMode.open {
+		c.clearRepeat()
+		s.handleCopyModeInput(c, data)
+		return
+	}
 	if c.configWarningOpen {
 		c.clearRepeat()
 		s.handleConfigWarningInput(c, data)
