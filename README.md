@@ -53,6 +53,10 @@ qmm
 `$(go env GOPATH)/bin`), so make sure that directory is on your `PATH`. To
 install a checkout instead, run `go install ./cmd/qmm`.
 
+Prebuilt release binaries are named `qmm_<os>_<arch>`. Put one on your `PATH`
+and it can keep itself current with `qmm update`; see
+[Staying up to date](#staying-up-to-date).
+
 Prefer building locally?
 
 ```sh
@@ -72,10 +76,45 @@ change the build output.
 qmm              # start the session server if needed, then attach
 qmm attach       # attach to the running session
 qmm kill-server  # terminate the session and all panes
+qmm update       # install the latest release
+qmm --version    # show the installed version
 ```
 
 The `server` subcommand is internal; the CLI starts it automatically on the
 first run.
+
+### Staying up to date
+
+```sh
+qmm update               # install the latest stable release
+qmm update --arch arm64   # pick a different architecture
+qmm update --pre          # also consider release candidates
+qmm update --help
+```
+
+`qmm update` reads the latest GitHub release, compares its tag with the
+running binary's version, and downloads the `qmm_<os>_<arch>` asset for this
+platform. The download URL must be an HTTPS
+`github.com/demongiggle/qmm/releases/download/...` URL; the new binary is
+written beside the executable and moved into place with an atomic rename. If
+the installed version is already current or newer, nothing is downloaded.
+Without `--pre` only stable releases are considered; with `--pre`, drafts are
+ignored and the highest-versioned release with a matching asset wins.
+`--arch` accepts `amd64`, `arm64`, `x86_64`, `aarch64`, or `os_arch` (the OS
+must match the host). Release assets are built for Linux (`amd64`, `arm64`),
+macOS (`amd64`, `arm64`), and FreeBSD (`amd64`); qmm is developed and tested
+on Linux, and the other Unix builds are cross-compiled.
+
+Release builds stamp their Git tag into the binary, so `qmm --version`
+reports something like `qmm v0.2.0`. Untagged builds (including `go install`
+builds) report `qmm dev` and always install the latest release, even if the
+binary on disk is already current.
+
+A detached qmm server keeps running the old binary after an update: existing
+windows, panes, and shells are never interrupted. New clients and servers
+start from the updated binary right away. When you want the running session
+itself to use the new version, restart it with `qmm kill-server` followed by
+`qmm` — this ends the current windows and panes, so save any work first.
 
 ### Your first minute
 
@@ -193,10 +232,12 @@ qmm (client)  ──gob over unix socket──▶  qmm server (detached daemon)
    input + mouse                             layout tree, compositor
 ```
 
-- `cmd/qmm` — CLI: spawn/attach and `kill-server`
+- `cmd/qmm` — CLI: spawn/attach, `kill-server`, and `update`
 - `internal/client` — tcell front-end: draws frames, encodes keys and mouse
 - `internal/server` — session daemon: pane/PTY management, layout, screen
   compositor, and prefix-key state machine
+- `internal/update` — GitHub release lookup, semver comparison, download, and
+  atomic self-replacement
 - `internal/layout` — binary split tree with rectangle math, hit-testing, and
   resize
 - `internal/protocol` — gob-encoded messages over a Unix socket
@@ -220,10 +261,17 @@ file path. Environment variables:
 
 ```sh
 make check         # format check, vet, build, and tests
+make release       # build qmm_<os>_<arch> release assets in dist/
 go test ./...      # unit + integration tests
 go vet ./...
 go build -o qmm ./cmd/qmm
 ```
+
+`make build` stamps the current Git tag into `qmm --version` (or `dev` for
+untagged commits); set `VERSION=vX.Y.Z` to override it. `make release`
+cross-compiles the Linux, macOS, and FreeBSD binaries that `qmm update`
+expects, using the same version value. Upload those `dist/qmm_*` files to the
+GitHub release for that tag.
 
 <details>
 <summary>Manual smoke checklist</summary>

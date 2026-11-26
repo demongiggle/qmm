@@ -3,7 +3,11 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -14,9 +18,13 @@ import (
 	"github.com/demongiggle/qmm/internal/client"
 	"github.com/demongiggle/qmm/internal/protocol"
 	"github.com/demongiggle/qmm/internal/server"
+	"github.com/demongiggle/qmm/internal/update"
 )
 
-const version = "0.1.0"
+// version is derived from the release tag by the Makefile and release builds
+// through -ldflags. Untagged builds report "dev" and always offer the latest
+// release when qmm update runs.
+var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -43,6 +51,10 @@ func main() {
 		if err := killServer(); err != nil {
 			fatal(err)
 		}
+	case "update":
+		if err := runUpdate(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fatal(err)
+		}
 	case "-h", "--help", "help":
 		usage(os.Stdout)
 	case "-v", "--version", "version":
@@ -61,8 +73,14 @@ Usage:
   qmm              Start the session server if needed and attach to it
   qmm attach       Attach to the running session (fails if none)
   qmm kill-server  Terminate the session server and all panes
+  qmm update       Install the latest qmm release
   qmm --help       Show this help
   qmm --version    Show version
+
+Self-update: qmm update downloads the newest release binary for this platform
+and atomically replaces the executable. qmm update --arch arm64 chooses an
+architecture and qmm update --pre also considers release candidates. A running
+server keeps the previous version until it is restarted.
 
 Inside qmm, press Ctrl-a to send a command prefix, followed by:
   |         split left/right (new pane to the right)
@@ -98,6 +116,20 @@ func socketPath() (string, error) {
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "qmm: %v\n", err)
 	os.Exit(1)
+}
+
+// runUpdate installs the latest GitHub release over the qmm executable.
+func runUpdate(arguments []string, stdout, stderr io.Writer) error {
+	err := update.Run(context.Background(), arguments, update.Options{
+		CurrentVersion: version,
+		Stdout:         stdout,
+		Stderr:         stderr,
+	})
+	// The flag package prints update usage itself for --help.
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
 }
 
 // ensureServerAndAttach starts the daemon if it isn't running, then attaches.
