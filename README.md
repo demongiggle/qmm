@@ -10,6 +10,12 @@
   <strong>One terminal. Every process. Pick up exactly where you left off.</strong>
 </p>
 
+<p align="center">
+  <a href="https://github.com/demongiggle/qmm/actions/workflows/ci.yml"><img src="https://github.com/demongiggle/qmm/actions/workflows/ci.yml/badge.svg" alt="ci" /></a>
+  <a href="https://github.com/demongiggle/qmm/releases/latest"><img src="https://img.shields.io/github/v/release/demongiggle/qmm" alt="latest release" /></a>
+  <a href="https://go.dev"><img src="https://img.shields.io/github/go-mod/go-version/demongiggle/qmm" alt="go version" /></a>
+</p>
+
 **qmm** is a tmux-like terminal multiplexer for Linux, written in Go. It
 turns one terminal into a color-rich workspace: shape it into panes, organize
 work into windows, move with the keyboard or the mouse, and detach while your
