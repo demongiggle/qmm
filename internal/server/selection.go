@@ -97,18 +97,15 @@ func (s *Server) handleSelectStart(c *clientConn, x, y int) {
 	s.startSelection(c, x, y)
 }
 
-// startSelection snapshots the active pane and anchors a selection at (x, y).
-// The client focuses the pressed pane before arming a drag, so the active pane
-// is the one under the pointer.
+// startSelection snapshots the pressed pane and anchors a selection at (x, y).
+// The client focuses the pressed pane before arming a drag, but the pane under
+// the pointer wins so a lost or reordered focus message cannot select the
+// wrong pane.
 func (s *Server) startSelection(c *clientConn, x, y int) {
 	if s.sess == nil {
 		return
 	}
-	p := s.sess.activePane()
-	if p == nil {
-		return
-	}
-	rect, ok := s.paneRects()[p.id]
+	p, rect, ok := s.paneAtPoint(x, y)
 	if !ok || rect.W < 1 || rect.H < 1 {
 		return
 	}
@@ -125,6 +122,30 @@ func (s *Server) startSelection(c *clientConn, x, y int) {
 	c.selection = st
 	c.forceFull = true
 	s.broadcast()
+}
+
+// paneAtPoint returns the pane whose viewport contains (x, y). Points that miss
+// every pane (a border, or a stale pointer position) fall back to the active
+// pane.
+func (s *Server) paneAtPoint(x, y int) (*pane, layout.Rect, bool) {
+	rects := s.paneRects()
+	for id, r := range rects {
+		if !r.Contains(x, y) {
+			continue
+		}
+		if p := s.sess.panes[id]; p != nil {
+			return p, r, true
+		}
+	}
+	p := s.sess.activePane()
+	if p == nil {
+		return nil, layout.Rect{}, false
+	}
+	r, ok := rects[p.id]
+	if !ok {
+		return nil, layout.Rect{}, false
+	}
+	return p, r, true
 }
 
 func (s *Server) handleSelectUpdate(c *clientConn, x, y int) {

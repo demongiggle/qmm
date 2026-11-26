@@ -488,6 +488,10 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 	// prefix chords and detach all keep working while a selection is visible.
 	if c.selection != nil {
 		if s.sess != nil && string(data) == copyKeySequence(s.sess.opts()) {
+			// The copy key is a keystroke of its own: it consumes a pending
+			// prefix instead of leaving the next key to continue the chord.
+			c.prefixArmed = false
+			c.prefixBuf = nil
 			c.clearRepeat()
 			s.copyMouseSelection(c)
 			return

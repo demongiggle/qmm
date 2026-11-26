@@ -172,8 +172,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			// A mouse selection shows a frozen snapshot of its pane, so the
 			// highlight cannot drift while output keeps arriving. Everything
 			// else on screen stays live.
-			if sel := c.selection; sel != nil && sel.paneID == id && sel.rect == r {
-				c.drawSelection(setCell, sel, r)
+			selected := c.selection != nil && c.selection.paneID == id && c.selection.rect == r
+			if selected {
+				c.drawSelection(setCell, c.selection, r)
 			} else {
 				blitPane(setCell, p, r)
 			}
@@ -183,7 +184,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			if id == w.activePane && !w.zoomed {
 				cur := p.vtCursor()
 				frame.CursorX, frame.CursorY = r.X+cur.x, r.Y+cur.y
-				frame.CursorVisible = cur.visible
+				// A frozen snapshot has no live caret.
+				frame.CursorVisible = cur.visible && !selected
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
 				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
@@ -249,14 +251,16 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				}
 				p := s.panes[w.activePane]
 				if p != nil {
-					if sel := c.selection; sel != nil && sel.paneID == p.id && sel.rect == inner {
-						c.drawSelection(setCell, sel, inner)
+					selected := c.selection != nil && c.selection.paneID == p.id && c.selection.rect == inner
+					if selected {
+						c.drawSelection(setCell, c.selection, inner)
 					} else {
 						blitPane(setCell, p, inner)
 					}
 					cur := p.vtCursor()
 					frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
-					frame.CursorVisible = cur.visible
+					// A frozen snapshot has no live caret.
+					frame.CursorVisible = cur.visible && !selected
 				} else {
 					frame.CursorVisible = false
 				}
@@ -278,11 +282,6 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				})
 			}
 		}
-	}
-
-	if c.selection != nil {
-		// The selected pane shows a frozen snapshot: no live caret.
-		frame.CursorVisible = false
 	}
 
 	c.drawStatusBar(&frame, setCell, s, opts, cols, rows)

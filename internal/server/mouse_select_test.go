@@ -93,6 +93,22 @@ func TestSelectUpdateClampsToTheSelectedPane(t *testing.T) {
 	}
 }
 
+func TestSelectStartTargetsThePaneUnderThePointer(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	if got := s.activeWindow().activePane; got != 1 {
+		t.Fatalf("active pane = %d, want 1", got)
+	}
+	// No ActionFocus first: the pointer position alone has to pick pane 2
+	// (which starts at column 41).
+	sel := startMouseSelection(t, s, c, 45, 5)
+	if sel.paneID != 2 {
+		t.Fatalf("paneID = %d, want the pane under the pointer (2)", sel.paneID)
+	}
+	if want := (copyPoint{line: sel.top + 5, col: 4}); sel.anchor != want {
+		t.Fatalf("anchor = %+v, want %+v", sel.anchor, want)
+	}
+}
+
 func TestSelectUpdateWithoutStartIsIgnored(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 3, Y: 3}})
@@ -469,5 +485,44 @@ func TestSelectActionsSwallowedWhileSettingsOpen(t *testing.T) {
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 2, Y: 2}})
 	if c.selection != nil || c.copyMode != nil {
 		t.Fatal("selection update leaked through the settings modal")
+	}
+}
+
+func TestCopyKeyConsumesPendingPrefix(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	writePaneText(t, s, 1, "clip me")
+	startMouseSelection(t, s, c, 0, 0)
+
+	// Arm the prefix, then start a drag: the prefix is still pending.
+	s.handleInput(c, []byte("\x01"))
+	if !c.prefixArmed {
+		t.Fatal("prefix did not arm")
+	}
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: 0, Y: 0}})
+	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 6, Y: 0}})
+
+	s.handleInput(c, []byte("\x1b[27;6;99~")) // Ctrl-Shift-C copy key
+	if _, ok := queuedClipboard(c); !ok {
+		t.Fatal("copy key did not copy")
+	}
+	if c.prefixArmed || c.prefixBuf != nil {
+		t.Fatal("copy key left the prefix armed for the next keystroke")
+	}
+}
+
+func TestSelectionCaretHiddenOnlyForTheFrozenPane(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	sel := startMouseSelection(t, s, c, 0, 0)
+	if c.frame == nil || c.frame.CursorVisible {
+		t.Fatal("frozen selection view should hide the caret")
+	}
+	// A selection whose rect no longer matches its pane is not drawn, so the
+	// pane stays live and keeps its caret. Compose is exercised directly: the
+	// broadcast path would drop the stale selection before rendering.
+	sel.rect = layout.Rect{X: 0, Y: 0, W: 1, H: 1}
+	c.comp.selection = sel
+	frame := c.comp.compose(s.sess, s.cols, s.rows, true)
+	if !frame.CursorVisible {
+		t.Fatal("stale selection hid the caret of a live pane")
 	}
 }
