@@ -262,3 +262,45 @@ func TestSteadyCaretClearsTextBlink(t *testing.T) {
 	}
 	assertNativeCursor(t, screen, 1, 0, true)
 }
+
+func TestApplyFrameReportsNoOpFrames(t *testing.T) {
+	base := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236}
+	blank := blankClientCell(0, 1)
+	screen := newCursorStyleScreen(t, 2, 1)
+	a := &attach{screen: screen}
+
+	if !a.applyFrame(protocol.Frame{
+		Full: true, Cols: 2, Rows: 1,
+		Cells:         []protocol.Cell{base, blank},
+		CursorX:       0,
+		CursorY:       0,
+		CursorVisible: true,
+	}) {
+		t.Fatal("initial full frame should report dirty")
+	}
+
+	// Empty incremental frame with identical cursor state is a no-op.
+	if a.applyFrame(protocol.Frame{
+		Cols: 2, Rows: 1,
+		CursorX: 0, CursorY: 0, CursorVisible: true,
+	}) {
+		t.Error("empty incremental frame with unchanged cursor should not report dirty")
+	}
+
+	// Moving the cursor reports dirty.
+	if !a.applyFrame(protocol.Frame{
+		Cols: 2, Rows: 1,
+		CursorX: 1, CursorY: 0, CursorVisible: true,
+	}) {
+		t.Error("cursor movement should report dirty")
+	}
+
+	// Changing a cell reports dirty.
+	if !a.applyFrame(protocol.Frame{
+		Cols: 2, Rows: 1,
+		Cells:   []protocol.Cell{{Row: 0, Col: 1, Ch: 'B', FG: 46, BG: 236}},
+		CursorX: 1, CursorY: 0, CursorVisible: true,
+	}) {
+		t.Error("cell update should report dirty")
+	}
+}

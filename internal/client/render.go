@@ -43,6 +43,7 @@ type attach struct {
 	grid          []protocol.Cell
 	gridCols      int
 	gridRows      int
+	hasFrame      bool
 	caretX        int
 	caretY        int
 	caretVisible  bool
@@ -255,7 +256,7 @@ func (a *attach) blinkCaret() bool {
 	return true
 }
 
-func (a *attach) applyFrame(f protocol.Frame) {
+func (a *attach) applyFrame(f protocol.Frame) bool {
 	if f.Cols > 0 && f.Rows > 0 {
 		a.frameCols, a.frameRows = f.Cols, f.Rows
 	}
@@ -268,6 +269,8 @@ func (a *attach) applyFrame(f protocol.Frame) {
 		a.screen.Clear()
 		cleared = true
 	}
+	dirty := !a.hasFrame || cleared
+	a.hasFrame = true
 	if cleared {
 		a.blinkCleared = false
 	} else {
@@ -279,10 +282,16 @@ func (a *attach) applyFrame(f protocol.Frame) {
 		if !a.inGrid(c.Col, c.Row) {
 			continue
 		}
-		a.grid[c.Row*a.gridCols+c.Col] = c
+		idx := c.Row*a.gridCols + c.Col
+		if cleared || a.grid[idx] != c {
+			dirty = true
+		}
+		a.grid[idx] = c
 		a.setScreenCell(c)
 	}
 	wasVisible := a.caretVisible
+	wasShown := a.caretShown()
+	wasX, wasY := a.caretX, a.caretY
 	styleChanged := a.caretShape != f.CursorShape || a.caretBlink != f.CursorBlink
 	a.caretVisible = f.CursorVisible
 	a.caretX, a.caretY = f.CursorX, f.CursorY
@@ -294,13 +303,18 @@ func (a *attach) applyFrame(f protocol.Frame) {
 	if styleChanged || (!wasVisible && a.caretVisible) || !a.caretBlink {
 		a.caretBlinkOff = false
 	}
-	if a.caretShown() {
+	nowShown := a.caretShown()
+	if nowShown {
 		a.drawSteadyCell(a.caretX, a.caretY)
 		a.blinkCleared = true
 		a.clearedX, a.clearedY = a.caretX, a.caretY
 	}
+	if styleChanged || wasShown != nowShown || (nowShown && (wasX != a.caretX || wasY != a.caretY)) {
+		dirty = true
+	}
 	a.syncCursor()
 	a.frame = f
+	return dirty
 }
 
 // statusRow is the row index of the status bar, in frame coordinates.

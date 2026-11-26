@@ -40,7 +40,7 @@ func Attach(socketPath string) error {
 
 	codec := protocol.NewCodec(conn)
 
-	screen, err := tcell.NewScreen()
+	screen, err := newScreen()
 	if err != nil {
 		return fmt.Errorf("qmm: init screen: %w", err)
 	}
@@ -127,8 +127,9 @@ func Attach(socketPath string) error {
 			}
 			switch m := m.(type) {
 			case protocol.Frame:
-				c.applyFrame(m)
-				screen.Show()
+				if c.applyFrame(m) {
+					screen.Show()
+				}
 			case protocol.Notice:
 				screen.Beep()
 			case protocol.Goodbye:
