@@ -231,3 +231,34 @@ func TestBlinkOffIsSteadyAndStyleChangeResetsPhase(t *testing.T) {
 		t.Errorf("steady cursor style = %v, want steady block", got)
 	}
 }
+
+func TestSteadyCaretClearsTextBlink(t *testing.T) {
+	blinking := protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236, Style: protocol.StyleBlink}
+	blank := blankClientCell(0, 1)
+	screen := newCursorStyleScreen(t, 2, 1)
+	a := &attach{screen: screen}
+	a.applyFrame(protocol.Frame{
+		Full: true, Cols: 2, Rows: 1,
+		Cells:         []protocol.Cell{blinking, blank},
+		CursorVisible: true, CursorBlink: false,
+	})
+	screen.Show()
+
+	// A steady caret must not inherit the terminal's slow text blink.
+	wantSteady := styleOf(protocol.Cell{Row: 0, Col: 0, Ch: 'A', FG: 46, BG: 236})
+	if got := screenStyleAt(t, screen, 0, 0); got != wantSteady {
+		t.Errorf("steady caret cell style = %#v, want %#v (blink cleared)", got, wantSteady)
+	}
+	assertNativeCursor(t, screen, 0, 0, true)
+
+	// Moving the caret restores the original blinking cell behind it.
+	a.applyFrame(protocol.Frame{
+		Cols: 2, Rows: 1, CursorX: 1,
+		CursorVisible: true, CursorBlink: false,
+	})
+	screen.Show()
+	if got := screenStyleAt(t, screen, 0, 0); got != styleOf(blinking) {
+		t.Errorf("old caret cell style = %#v, want restored %#v", got, styleOf(blinking))
+	}
+	assertNativeCursor(t, screen, 1, 0, true)
+}

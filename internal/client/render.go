@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/uniseg"
 
 	"github.com/demongiggle/qmm/internal/protocol"
 )
@@ -48,6 +49,15 @@ type attach struct {
 	caretShape    uint8
 	caretBlink    bool
 	caretBlinkOff bool // zero value means the native cursor is shown
+
+	// blinkCleared tracks whether the cell under the shown caret is
+	// currently drawn without its text-blink attribute. The grid always
+	// keeps the original style; the screen copy clears blink while the
+	// native cursor is visible so a blinking cell underneath cannot make
+	// a steady caret look like it blinks at the terminal's slow rate.
+	blinkCleared bool
+	clearedX     int
+	clearedY     int
 
 	dragging     bool
 	dragID       int
@@ -106,6 +116,10 @@ func cellRune(ch rune) rune {
 	return ch
 }
 
+func wideCell(ch rune) bool {
+	return uniseg.StringWidth(string(cellRune(ch))) == 2
+}
+
 func (a *attach) resetGrid(cols, rows int) {
 	a.gridCols, a.gridRows = cols, rows
 	a.grid = make([]protocol.Cell, cols*rows)
@@ -114,6 +128,7 @@ func (a *attach) resetGrid(cols, rows int) {
 			a.grid[y*cols+x] = blankClientCell(y, x)
 		}
 	}
+	a.blinkCleared = false
 }
 
 // ensureGrid rebuilds the local copy after a full frame or a size change.
@@ -123,6 +138,7 @@ func (a *attach) ensureGrid(f protocol.Frame) bool {
 	cols, rows := a.frameCols, a.frameRows
 	if cols <= 0 || rows <= 0 {
 		a.grid, a.gridCols, a.gridRows = nil, 0, 0
+		a.blinkCleared = false
 		return false
 	}
 	if !f.Full && a.gridCols == cols && a.gridRows == rows && len(a.grid) == cols*rows {
@@ -141,6 +157,57 @@ func (a *attach) setScreenCell(c protocol.Cell) {
 		return
 	}
 	a.screen.SetContent(c.Col, c.Row, cellRune(c.Ch), nil, styleOf(c))
+}
+
+// paintCell restores one unadorned cell, including the trailing cell that
+// tcell may reserve when the rune is double-width.
+func (a *attach) paintCell(x, y int) {
+	if !a.inGrid(x, y) {
+		return
+	}
+	c := a.grid[y*a.gridCols+x]
+	c.Row, c.Col = y, x
+	a.setScreenCell(c)
+	if wideCell(c.Ch) && x+1 < a.gridCols {
+		next := a.grid[y*a.gridCols+x+1]
+		next.Row, next.Col = y, x+1
+		a.setScreenCell(next)
+	}
+}
+
+// drawSteadyCell redraws the caret cell without its text-blink attribute,
+// including the trailing cell for double-width runes. The grid keeps the
+// original style; only the screen copy is steadied while the native cursor
+// is visible.
+func (a *attach) drawSteadyCell(x, y int) {
+	if !a.inGrid(x, y) {
+		return
+	}
+	c := a.grid[y*a.gridCols+x]
+	c.Row, c.Col = y, x
+	c.Style &^= protocol.StyleBlink
+	a.setScreenCell(c)
+	if wideCell(c.Ch) && x+1 < a.gridCols {
+		next := a.grid[y*a.gridCols+x+1]
+		next.Row, next.Col = y, x+1
+		a.setScreenCell(next)
+	}
+}
+
+// caretShown reports whether the native cursor will be visible for the
+// current caret state.
+func (a *attach) caretShown() bool {
+	return a.caretVisible && (!a.caretBlink || !a.caretBlinkOff) && a.inGrid(a.caretX, a.caretY)
+}
+
+// restoreBlinkCell returns a previously steadied caret cell to its original
+// blinking style.
+func (a *attach) restoreBlinkCell() {
+	if !a.blinkCleared {
+		return
+	}
+	a.blinkCleared = false
+	a.paintCell(a.clearedX, a.clearedY)
 }
 
 // nativeCursorShape maps the shared cursor-shape setting to a steady
@@ -162,7 +229,7 @@ func nativeCursorShape(shape uint8) tcell.CursorStyle {
 // before screen.Show(), which flushes cursor state as part of its redraw.
 func (a *attach) syncCursor() {
 	a.screen.SetCursorStyle(nativeCursorShape(a.caretShape))
-	if a.caretVisible && (!a.caretBlink || !a.caretBlinkOff) && a.inGrid(a.caretX, a.caretY) {
+	if a.caretShown() {
 		a.screen.ShowCursor(a.caretX, a.caretY)
 		return
 	}
@@ -177,6 +244,13 @@ func (a *attach) blinkCaret() bool {
 		return false
 	}
 	a.caretBlinkOff = !a.caretBlinkOff
+	if a.caretShown() {
+		a.drawSteadyCell(a.caretX, a.caretY)
+		a.blinkCleared = true
+		a.clearedX, a.clearedY = a.caretX, a.caretY
+	} else {
+		a.restoreBlinkCell()
+	}
 	a.syncCursor()
 	return true
 }
@@ -192,6 +266,14 @@ func (a *attach) applyFrame(f protocol.Frame) {
 	}
 	if a.ensureGrid(f) && !cleared {
 		a.screen.Clear()
+		cleared = true
+	}
+	if cleared {
+		a.blinkCleared = false
+	} else {
+		// Restore a previously steadied caret cell before new cells arrive,
+		// so a moved or hidden caret never leaves a blink-free copy behind.
+		a.restoreBlinkCell()
 	}
 	for _, c := range f.Cells {
 		if !a.inGrid(c.Col, c.Row) {
@@ -211,6 +293,11 @@ func (a *attach) applyFrame(f protocol.Frame) {
 	// frames leave a blinking caret's phase untouched.
 	if styleChanged || (!wasVisible && a.caretVisible) || !a.caretBlink {
 		a.caretBlinkOff = false
+	}
+	if a.caretShown() {
+		a.drawSteadyCell(a.caretX, a.caretY)
+		a.blinkCleared = true
+		a.clearedX, a.clearedY = a.caretX, a.caretY
 	}
 	a.syncCursor()
 	a.frame = f
