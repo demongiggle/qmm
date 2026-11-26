@@ -27,6 +27,8 @@ func TestEncodeKey(t *testing.T) {
 		{"ctrl-shift-a", key('A', tcell.KeyRune, tcell.ModCtrl|tcell.ModShift), []byte("\x1b[27;6;97~")},
 		{"ctrl-shift-c", key('C', tcell.KeyRune, tcell.ModCtrl|tcell.ModShift), []byte("\x1b[27;6;99~")},
 		{"ctrl-shift-c lowercase", key('c', tcell.KeyRune, tcell.ModCtrl|tcell.ModShift), []byte("\x1b[27;6;99~")},
+		{"ctrl-shift-c (KeyCtrlC)", key(0, tcell.KeyCtrlC, tcell.ModCtrl|tcell.ModShift), []byte("\x1b[27;6;99~")},
+		{"ctrl-c (KeyCtrlC) stays plain", key(0, tcell.KeyCtrlC, tcell.ModCtrl), []byte{0x03}},
 		{"ctrl-shift-y", key('Y', tcell.KeyRune, tcell.ModCtrl|tcell.ModShift), []byte("\x1b[27;6;121~")},
 		{"alt-a", key('a', tcell.KeyRune, tcell.ModAlt), []byte{0x1b, 'a'}},
 		{"alt-ctrl-a", key('a', tcell.KeyRune, tcell.ModAlt|tcell.ModCtrl), []byte{0x1b, 0x01}},

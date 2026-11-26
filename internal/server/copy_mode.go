@@ -768,7 +768,18 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 	case seq == "y" || seq == "\r" || seq == "\n":
 		s.copySelection(c)
 		return
-	case seq == "q" || seq == "\x1b" || seq == "\x03":
+	case seq == "q" || seq == "\x1b":
+		s.closeCopyMode(c)
+		return
+	case seq == "\x03": // Ctrl-c
+		// Plain Ctrl-C reaches the server even when the terminal grabs
+		// Ctrl-Shift-C for its own clipboard. Copy when a selection is
+		// active (mouse drag, v/V/Ctrl-v); otherwise leave without
+		// copying so an empty copy mode still quits cleanly.
+		if st.selKind != selectionNone {
+			s.copySelection(c)
+			return
+		}
 		s.closeCopyMode(c)
 		return
 	default:

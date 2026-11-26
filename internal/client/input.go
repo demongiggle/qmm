@@ -84,6 +84,22 @@ func encodeKey(ev *tcell.EventKey) []byte {
 	}
 	switch {
 	case key >= tcell.KeyCtrlA && key <= tcell.KeyCtrlZ:
+		if shift {
+			// Some terminals (win32-input-mode, Kitty CSI-u) deliver
+			// Ctrl-Shift-<letter> as a KeyCtrl* code with a Shift
+			// modifier instead of a KeyRune. Preserve the Shift by
+			// re-encoding in xterm's modifyOtherKeys format so the
+			// server can still match the configured copy key.
+			// Without this the Shift is silently dropped and
+			// Ctrl-Shift-C collapses to Ctrl-C (cancel).
+			letter := ev.Rune()
+			if letter == 0 {
+				letter = rune(byte(key-tcell.KeyCtrlA) + 'a')
+			}
+			if lower := unicode.ToLower(letter); (lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9') {
+				return []byte(fmt.Sprintf("\x1b[27;%d;%d~", modParam(shift, true, alt), lower))
+			}
+		}
 		return withAlt([]byte{byte(key-tcell.KeyCtrlA) + 1}, alt)
 	case key == tcell.KeyRune:
 		r := ev.Rune()
@@ -91,7 +107,7 @@ func encodeKey(ev *tcell.EventKey) []byte {
 			// Keep Ctrl-Shift-<letter> distinguishable from Ctrl-<letter> by
 			// re-encoding it in xterm's modifyOtherKeys format. The server
 			// matches this sequence for the configurable copy key.
-			return []byte(fmt.Sprintf("\x1b[27;6;%d~", unicode.ToLower(r)))
+			return []byte(fmt.Sprintf("\x1b[27;%d;%d~", modParam(shift, true, alt), unicode.ToLower(r)))
 		}
 		if ctrl && ((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
 			return withAlt([]byte{byte(unicode.ToLower(r)) - 'a' + 1}, alt)

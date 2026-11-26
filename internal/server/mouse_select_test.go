@@ -116,6 +116,56 @@ func TestCopyKeyFallsBackForUnsetSetting(t *testing.T) {
 	}
 }
 
+func TestCtrlCCopiesActiveMouseSelection(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	writePaneText(t, s, 1, "clip me")
+
+	s.handleSelectStart(c, 0, 0)
+	s.handleSelectUpdate(c, 6, 0)
+	s.handleCopyModeInput(c, []byte("\x03"))
+
+	if c.copyMode != nil {
+		t.Fatal("Ctrl-C did not close copy mode")
+	}
+	clip, ok := queuedClipboard(c)
+	if !ok {
+		t.Fatal("Ctrl-C did not enqueue a Clipboard message for a mouse selection")
+	}
+	if clip.Text != "clip me" {
+		t.Fatalf("clipboard = %q, want %q", clip.Text, "clip me")
+	}
+}
+
+func TestCtrlCQuitsWithoutSelection(t *testing.T) {
+	s, c, _ := newCopyModeFixture(80, 24, linesOf(10, "row %02d"))
+	// No v/V/Ctrl-v: selKind is selectionNone, so Ctrl-C must quit
+	// without copying (same as q/Esc).
+	s.handleCopyModeInput(c, []byte("\x03"))
+	if c.copyMode != nil {
+		t.Fatal("Ctrl-C did not close empty copy mode")
+	}
+	if _, ok := queuedClipboard(c); ok {
+		t.Fatal("Ctrl-C copied without an active selection")
+	}
+}
+
+func TestCtrlCCopiesKeyboardSelection(t *testing.T) {
+	s, c, st := newCopyModeFixture(80, 24, []copyLine{lineOf("alpha"), lineOf("bravo")})
+	st.gotoLine(0)
+	copyKeys(s, c, "v", "l")
+	s.handleCopyModeInput(c, []byte("\x03"))
+	if c.copyMode != nil {
+		t.Fatal("Ctrl-C did not close copy mode after keyboard selection")
+	}
+	clip, ok := queuedClipboard(c)
+	if !ok {
+		t.Fatal("Ctrl-C did not copy keyboard selection")
+	}
+	if clip.Text != "al" {
+		t.Fatalf("clipboard = %q, want %q", clip.Text, "al")
+	}
+}
+
 func TestWheelExtendsMouseSelectionIntoScrollback(t *testing.T) {
 	s, c, st := newCopyModeFixture(80, 24, linesOf(40, "row %02d"))
 	st.mouseOrigin = true

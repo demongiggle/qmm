@@ -240,10 +240,11 @@ scrollback into a copy-mode view with the selection anchored where you pressed
 the button. The status bar stays in place while a mouse selection is active.
 Press the configured copy key (`Ctrl-Shift-C` by default; see
 [settings](#help-and-settings-right-where-you-work)) to copy the selection and
-return to the live pane; `y` or `Enter` work too. While the selection is
+return to the live pane; `y`, `Enter`, or `Ctrl-c` (with an active selection)
+work too. While the selection is
 active, the mouse wheel scrolls the snapshot and extends the selection into
 scrollback. The selection highlight stays visible until you copy or leave
-copy mode (`Esc`).
+copy mode (`Esc`, `q`).
 
 | Key | Action |
 | :--- | :--- |
@@ -256,15 +257,15 @@ copy mode (`Esc`).
 | `/` / `?`, `n` / `N` | Search forward / backward, repeat / reverse |
 | `v` / `V` / `Ctrl-v` | Character / line / rectangle selection |
 | `Ctrl-Shift-C` (configurable) | Copy the selection and leave copy mode |
-| `y`, Enter | Copy the selection and leave copy mode |
-| `q`, `Esc`, `Ctrl-c` | Leave copy mode without copying |
+| `y`, Enter, `Ctrl-c` with selection | Copy the selection and leave copy mode |
+| `q`, `Esc`, `Ctrl-c` with no selection | Leave copy mode without copying |
 
 The copy key is configured in the **Copy mode** settings section (or as
 `copy_key` under `[copy]` in `config.toml`) and accepts `Ctrl-Shift-C`
 (default), `Ctrl-Shift-X`, `Ctrl-Y`, or `Ctrl-Insert`. Note that many
-terminals grab `Ctrl-Shift-C` for their own clipboard and never forward it;
-pick another binding there if copies seem to do nothing. `y` and `Enter`
-always work. The selection is a character-wise snapshot: text is captured
+terminals grab `Ctrl-Shift-C`/`Ctrl-Insert` for their own clipboard and never
+forward them; if copies seem to do nothing, use `y`, `Enter`, or `Ctrl-c`
+with an active selection, or switch to `Ctrl-Y`. The selection is a character-wise snapshot: text is captured
 as of the moment the drag started, so output that scrolls in afterwards is
 not part of the selection.
 
@@ -300,7 +301,8 @@ highlight stays visible after you release the button. Scrolling the wheel
 with a selection active extends it into (or back out of) the scrollback.
 Pressing the configured copy key — `Ctrl-Shift-C` by default — copies the
 selection to the host clipboard and qmm's paste buffer and returns to the
-live pane, where `Ctrl-a` `]` pastes it. `Esc` cancels without copying.
+live pane, where `Ctrl-a` `]` pastes it. `y`, `Enter`, or `Ctrl-c` with the
+mouse selection active copy too; `Esc` or `q` cancels without copying.
 Plain clicks (no drag) behave as before: click to focus, double-click to zoom.
 While a selection is open the mouse is otherwise captured by the selection, so
 window-switch clicks are ignored until you copy or cancel.
