@@ -199,7 +199,10 @@ func (p *pane) readLoop(exitCh chan int, onOutput func()) {
 			p.notifyExit(exitCh)
 			return
 		}
-		if onOutput != nil {
+		// Drain the entire buffered PTY chunk before scheduling a render so
+		// applications that hide/redraw/show the cursor in one write (such
+		// as watch or ncurses) don't emit intermediate cursor-hidden frames.
+		if br.Buffered() == 0 && onOutput != nil {
 			onOutput()
 		}
 	}

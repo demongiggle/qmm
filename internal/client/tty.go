@@ -9,13 +9,16 @@ import (
 	"github.com/gdamore/tcell/v2/terminfo"
 )
 
-var syncOutStart = []byte("\x1b[?2026h")
+var (
+	syncOutStart = []byte("\x1b[?2026h")
+	syncOutEnd   = []byte("\x1b[?2026l")
+)
 
-// newScreen creates a tcell screen whose tty suppresses redundant per-frame
-// cursor hide/show and DECSCUSR sequences. Without this, tcell's Show()
-// hides and re-shows the native cursor on every redraw, causing a steady
-// cursor to visibly blink at the screen refresh rate (1 Hz on the status
-// clock tick, faster during active output).
+// newScreen creates a tcell screen whose tty strips tcell's unconditional
+// per-frame DEC mode 2026 synchronized-output wrapper as well as redundant
+// cursor hide/show and DECSCUSR sequences. Both mode 2026 (e.g. in WezTerm on
+// WSL2) and per-redraw hide/show toggles can cause a steady native cursor to
+// visibly blink on every screen update.
 func newScreen() (tcell.Screen, error) {
 	if term := os.Getenv("TERM"); term != "" {
 		if ti, err := tcell.LookupTerminfo(term); err == nil {
@@ -32,8 +35,9 @@ func newScreen() (tcell.Screen, error) {
 }
 
 // steadyCursorTty wraps a tcell.Tty to track the host terminal's cursor
-// visibility and DECSCUSR style, stripping tcell's unconditional per-redraw
-// hide/show and redundant style escapes when the cursor state has not changed.
+// visibility and DECSCUSR style, stripping tcell's per-redraw DEC mode 2026
+// wrapper and redundant hide/show/style escapes when the cursor state has not
+// changed.
 type steadyCursorTty struct {
 	tcell.Tty
 	hideSeq []byte
@@ -43,6 +47,7 @@ type steadyCursorTty struct {
 	cursorKnown   bool
 	cursorVisible bool
 	lastStyleSeq  []byte
+	dropSyncEnd   bool
 }
 
 func newSteadyCursorTty(tty tcell.Tty, ti *terminfo.Terminfo) *steadyCursorTty {
@@ -66,6 +71,7 @@ func (w *steadyCursorTty) Stop() error {
 	w.mu.Lock()
 	w.cursorKnown = false
 	w.lastStyleSeq = nil
+	w.dropSyncEnd = false
 	w.mu.Unlock()
 	return w.Tty.Stop()
 }
@@ -87,10 +93,19 @@ func (w *steadyCursorTty) Write(p []byte) (int, error) {
 // filterLocked rewrites a single tcell write buffer. tcell's draw() flushes
 // an entire frame in one Write call framed by optional sync-output start,
 // HideCursor at the beginning, and either HideCursor or ShowCursor+[DECSCUSR]
-// at the end. Standalone writes from Init/Fini pass through and update state.
+// at the end, followed by a standalone sync-output end write. Standalone
+// cursor writes from Init/Fini pass through and update tracked state.
 func (w *steadyCursorTty) filterLocked(p []byte) []byte {
 	if len(w.hideSeq) == 0 || len(w.showSeq) == 0 {
 		return p
+	}
+
+	// Drop the trailing syncOutEnd paired with a stripped syncOutStart.
+	if w.dropSyncEnd {
+		w.dropSyncEnd = false
+		if bytes.Equal(p, syncOutEnd) {
+			return nil
+		}
 	}
 
 	// Standalone control sequences from Init (engage) and Fini (disengage).
@@ -110,25 +125,28 @@ func (w *steadyCursorTty) filterLocked(p []byte) []byte {
 	}
 
 	// Frame buffer from tScreen.draw(): [syncOutStart] + hideSeq + ...
-	prefixEnd := 0
-	if bytes.HasPrefix(p, syncOutStart) {
-		prefixEnd = len(syncOutStart)
+	hasSyncOut := bytes.HasPrefix(p, syncOutStart)
+	trimmed := p
+	if hasSyncOut {
+		trimmed = p[len(syncOutStart):]
 	}
-	if !bytes.HasPrefix(p[prefixEnd:], w.hideSeq) {
+	if !bytes.HasPrefix(trimmed, w.hideSeq) {
 		return p
 	}
-	prefix := p[:prefixEnd]
-	rest := p[prefixEnd+len(w.hideSeq):]
+	rest := trimmed[len(w.hideSeq):]
 
 	// Cursor hidden at end of frame: ... + hideSeq.
 	if bytes.HasSuffix(rest, w.hideSeq) {
 		body := rest[:len(rest)-len(w.hideSeq)]
+		if hasSyncOut {
+			w.dropSyncEnd = true
+		}
 		if w.cursorKnown && !w.cursorVisible {
-			return joinBytes(prefix, body)
+			return body
 		}
 		w.cursorKnown = true
 		w.cursorVisible = false
-		return joinBytes(prefix, w.hideSeq, body)
+		return joinBytes(w.hideSeq, body)
 	}
 
 	// Cursor visible at end of frame: ... + showSeq + [DECSCUSR].
@@ -159,7 +177,10 @@ func (w *steadyCursorTty) filterLocked(p []byte) []byte {
 		trailStyle = styleSeq
 		w.lastStyleSeq = append(w.lastStyleSeq[:0], styleSeq...)
 	}
-	return joinBytes(prefix, leadHide, body, trailShow, trailStyle)
+	if hasSyncOut {
+		w.dropSyncEnd = true
+	}
+	return joinBytes(leadHide, body, trailShow, trailStyle)
 }
 
 func isDECSCUSR(b []byte) bool {

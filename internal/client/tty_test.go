@@ -14,6 +14,7 @@ import (
 type fakeTty struct {
 	mu     sync.Mutex
 	buf    bytes.Buffer
+	writes int
 	closed chan struct{}
 	cols   int
 	rows   int
@@ -48,6 +49,7 @@ func (f *fakeTty) Read(p []byte) (int, error) {
 func (f *fakeTty) Write(p []byte) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.writes++
 	return f.buf.Write(p)
 }
 func (f *fakeTty) Close() error { return f.Drain() }
@@ -57,7 +59,18 @@ func (f *fakeTty) take() []byte {
 	defer f.mu.Unlock()
 	out := append([]byte(nil), f.buf.Bytes()...)
 	f.buf.Reset()
+	f.writes = 0
 	return out
+}
+
+func (f *fakeTty) takeWithCount() ([]byte, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := append([]byte(nil), f.buf.Bytes()...)
+	n := f.writes
+	f.buf.Reset()
+	f.writes = 0
+	return out, n
 }
 
 func TestSteadyCursorTtySuppressesPerFrameCursorToggle(t *testing.T) {
@@ -102,6 +115,9 @@ func TestSteadyCursorTtySuppressesPerFrameCursorToggle(t *testing.T) {
 	})
 	screen.Show()
 	out := raw.take()
+	if bytes.Contains(out, syncOutStart) || bytes.Contains(out, syncOutEnd) {
+		t.Errorf("first visible frame emitted DEC mode 2026 sync output: %q", out)
+	}
 	if bytes.Contains(out, hideSeq) {
 		t.Errorf("first visible frame emitted redundant HideCursor: %q", out)
 	}
@@ -124,7 +140,13 @@ func TestSteadyCursorTtySuppressesPerFrameCursorToggle(t *testing.T) {
 			CursorShape: protocol.CursorShapeBlock, CursorBlink: false,
 		})
 		screen.Show()
-		out = raw.take()
+		out, writes := raw.takeWithCount()
+		if writes != 1 {
+			t.Errorf("steady frame %d used %d tty writes, want 1", i, writes)
+		}
+		if bytes.Contains(out, syncOutStart) || bytes.Contains(out, syncOutEnd) {
+			t.Errorf("steady frame %d emitted DEC mode 2026 sync output: %q", i, out)
+		}
 		if bytes.Contains(out, hideSeq) {
 			t.Errorf("steady frame %d emitted HideCursor: %q", i, out)
 		}
