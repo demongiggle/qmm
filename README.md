@@ -61,9 +61,24 @@ qmm
 `$(go env GOPATH)/bin`), so make sure that directory is on your `PATH`. To
 install a checkout instead, run `go install ./cmd/qmm`.
 
-Prebuilt release binaries are named `qmm_<os>_<arch>`. Put one on your `PATH`
-and it can keep itself current with `qmm update`; see
-[Staying up to date](#staying-up-to-date).
+Prebuilt releases ship `qmm_<os>_<arch>.tar.gz` (plus `SHA256SUMS`)
+and raw `qmm_<os>_<arch>` binaries. For a manual install, download the
+tarball for your platform, verify it, and put the extracted `qmm` on your
+`PATH` — the tar preserves the executable bit that GitHub strips from raw
+downloads:
+
+```sh
+curl -LO https://github.com/demongiggle/qmm/releases/download/v0.1.0/qmm_linux_amd64.tar.gz
+curl -LO https://github.com/demongiggle/qmm/releases/download/v0.1.0/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+tar xzf qmm_linux_amd64.tar.gz
+./qmm --version
+```
+
+Once on your `PATH`, it can keep itself current with `qmm update`; see
+[Staying up to date](#staying-up-to-date). `qmm update` downloads the raw
+`qmm_<os>_<arch>` asset and applies the executable bit itself, so self-update
+is unaffected.
 
 Prefer building locally?
 
