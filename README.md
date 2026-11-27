@@ -224,12 +224,15 @@ to close it. The menu is local to the attached client.
 `Ctrl-r` to reload external config edits, or `q`, `Esc`, `Ctrl-c`, `s`, or
 `Ctrl-a` `s` to close.
 
-Tune eleven values: the status clock, active border color, cursor shape
-(`Block`, `Underline`, or `Bar`), cursor blink, pane-number timeout,
-double-click zoom, keyboard resize step, automatic window names, shutdown
-confirmation, the copy status line color, and the copy-selection key. The
-default caret is a steady block; turn **Cursor blink** on for
-the 500 ms blink cycle. **Cursor shape** uses the host terminal's native
+Tune twelve values: the status clock, status bar color, active border color,
+cursor shape (`Block`, `Underline`, or `Bar`), cursor blink, pane-number
+timeout, double-click zoom, keyboard resize step, automatic window names,
+shutdown confirmation, the copy status line color, and the copy-selection key.
+Both bars draw from the same eleven-color palette — **Slate**, **Blue**,
+**Navy**, **Teal**, **Green**, **Olive**, **Amber**, **Orange**, **Red**,
+**Purple**, and **Magenta** — so the session bar and the copy line can be told
+apart at a glance. The default caret is a steady block; turn **Cursor blink**
+on for the 500 ms blink cycle. **Cursor shape** uses the host terminal's native
 DECSCUSR caret — steady block, underline, or bar — so the underlying pane text
 stays visible. qmm toggles that caret's visibility for blinking, keeping its
 rate independent of pane output and frame rate. Applications still control
@@ -295,7 +298,9 @@ the configured key only, since every other key belongs to the pane. The
 has the details and the per-terminal workarounds. The copy status line color
 (**Status line color** in the settings page, or `status_line_color` under
 `[copy]`) defaults to **Blue** — deliberately unlike the grey session bar, so
-the two lines are never confused.
+the two lines are never confused. It shares its palette with **Status bar
+color** (`status_bar_color` under `[appearance]`), where **Slate** keeps the
+classic grey bar.
 
 Motions accept a numeric prefix (`10j`, `3w`), and the view follows the
 cursor. `y` with no active selection copies the current line. Copied text goes

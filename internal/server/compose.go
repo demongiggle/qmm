@@ -308,8 +308,9 @@ func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int,
 	sbY := rows - 1
 	showClock := opts.showClock()
 	activeColor := opts.borderColor()
+	bar := opts.statusBarStyle()
 	for x := 0; x < cols; x++ {
-		setCell(x, sbY, ' ', colBarFG, colBarBG, 0)
+		setCell(x, sbY, ' ', bar.fg, bar.bg, 0)
 	}
 	col := 0
 	reserve := 0
@@ -334,7 +335,7 @@ func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int,
 		}
 		start := col
 		for _, r := range runes {
-			fg, bg := int32(colBarFG), int32(colBarBG)
+			fg, bg := bar.fg, bar.bg
 			var st uint8
 			if isActive {
 				fg, bg = colBarActiveFG, activeColor
@@ -352,7 +353,7 @@ func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int,
 	if showClock {
 		clock := time.Now().Format("15:04:05")
 		for i, r := range []rune(clock) {
-			setCell(cols-len(clock)+i, sbY, r, colBarFG, colBarBG, 0)
+			setCell(cols-len(clock)+i, sbY, r, bar.fg, bar.bg, 0)
 		}
 	}
 }

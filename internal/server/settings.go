@@ -28,16 +28,17 @@ const (
 	settingResizeStep      settingID = "resize_step"
 	settingAutoNameWindows settingID = "auto_name_windows"
 	settingConfirmShutdown settingID = "confirm_shutdown"
+	settingStatusBarColor  settingID = "status_bar_color"
 	settingCopyStatusColor settingID = "copy_status_color"
 	settingCopyKey         settingID = "copy_key"
 )
 
-// statusLineStyle is the palette of the copy-mode status line that covers the
-// session status bar.
-type statusLineStyle struct {
-	bg  int32 // line background
-	fg  int32 // hint text
-	key int32 // label text
+// statusBarStyle is one status-bar palette: a dark line background with light
+// text, plus an accent used by the copy-mode label.
+type statusBarStyle struct {
+	bg     int32 // line background
+	fg     int32 // inactive text, clock, hint
+	accent int32 // copy-mode label
 }
 
 var (
@@ -46,15 +47,26 @@ var (
 	borderColorNames = []string{"Green", "Cyan", "Yellow", "Magenta"}
 	borderColorCodes = []int32{46, 39, 226, 201}
 
-	// copyStatusPalette colors the copy-mode status line that replaces the
-	// session status bar. The shades are deliberately far from the session
-	// bar's grey so the two lines are never mistaken for each other.
-	copyStatusNames   = []string{"Blue", "Purple", "Green", "Amber"}
-	copyStatusPalette = []statusLineStyle{
-		{bg: colCopyStatusBG, fg: colCopyStatusFG, key: colCopyStatusKey},
-		{bg: 54, fg: 250, key: 219},
-		{bg: 22, fg: 250, key: 157},
-		{bg: 94, fg: 250, key: 228},
+	// statusBarNames and statusBarColors are shared by the session status bar
+	// and the copy-mode status line, so both can be tuned from one palette.
+	// Every entry is dark with light text; Slate reproduces the classic grey
+	// bar, and Blue is the copy default so the two bars differ out of the box.
+	statusBarNames = []string{
+		"Slate", "Blue", "Navy", "Teal", "Green", "Olive",
+		"Amber", "Orange", "Red", "Purple", "Magenta",
+	}
+	statusBarColors = []statusBarStyle{
+		{bg: colBarBG, fg: colBarFG, accent: 46}, // Slate
+		{bg: 24, fg: 250, accent: 195},           // Blue
+		{bg: 17, fg: 252, accent: 81},            // Navy
+		{bg: 30, fg: 252, accent: 159},           // Teal
+		{bg: 22, fg: 252, accent: 157},           // Green
+		{bg: 58, fg: 252, accent: 191},           // Olive
+		{bg: 94, fg: 252, accent: 228},           // Amber
+		{bg: 130, fg: 252, accent: 215},          // Orange
+		{bg: 52, fg: 252, accent: 210},           // Red
+		{bg: 54, fg: 252, accent: 219},           // Purple
+		{bg: 88, fg: 252, accent: 213},           // Magenta
 	}
 
 	cursorShapeNames = []string{"Block", "Underline", "Bar"}
@@ -97,6 +109,7 @@ var settingsSections = []settingsSection{
 		Title: "Appearance",
 		Options: []settingDef{
 			{ID: settingStatusClock, Label: "Status bar clock", Values: onOffValues, Default: 0},
+			{ID: settingStatusBarColor, Label: "Status bar color", Values: statusBarNames, Default: 0},
 			{ID: settingBorderColor, Label: "Active pane border", Values: borderColorNames, Default: 0},
 			{ID: settingCursorShape, Label: "Cursor shape", Values: cursorShapeNames, Default: 0},
 			{ID: settingCursorBlink, Label: "Cursor blink", Values: onOffValues, Default: 1},
@@ -125,7 +138,7 @@ var settingsSections = []settingsSection{
 	{
 		Title: "Copy mode",
 		Options: []settingDef{
-			{ID: settingCopyStatusColor, Label: "Status line color", Values: copyStatusNames, Default: 0},
+			{ID: settingCopyStatusColor, Label: "Status line color", Values: statusBarNames, Default: 1},
 			{ID: settingCopyKey, Label: "Copy selection key", Values: copyKeyNames, Default: 0},
 		},
 	},
@@ -315,16 +328,28 @@ func (st *settingsState) confirmShutdown() bool {
 	return st.boolSetting(settingConfirmShutdown, true)
 }
 
-func (st *settingsState) copyStatusStyle() statusLineStyle {
-	def, ok := settingByID(settingCopyStatusColor)
+// statusBarStyleAt returns the palette entry for one status-bar color setting,
+// falling back to fallback when the setting is missing or out of range.
+func (st *settingsState) statusBarStyleAt(id settingID, fallback int) statusBarStyle {
+	def, ok := settingByID(id)
 	if !ok {
-		return copyStatusPalette[0]
+		return statusBarColors[fallback]
 	}
 	idx := st.index(def)
-	if idx < 0 || idx >= len(copyStatusPalette) {
-		return copyStatusPalette[0]
+	if idx < 0 || idx >= len(statusBarColors) {
+		return statusBarColors[fallback]
 	}
-	return copyStatusPalette[idx]
+	return statusBarColors[idx]
+}
+
+// statusBarStyle colors the session status bar (tabs and clock).
+func (st *settingsState) statusBarStyle() statusBarStyle {
+	return st.statusBarStyleAt(settingStatusBarColor, 0)
+}
+
+// copyStatusStyle colors the copy-mode status line that covers the session bar.
+func (st *settingsState) copyStatusStyle() statusBarStyle {
+	return st.statusBarStyleAt(settingCopyStatusColor, 1)
 }
 
 func settingsOptionCount() int {

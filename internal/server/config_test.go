@@ -46,7 +46,7 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 		t.Fatalf("read default config: %v", err)
 	}
 	for _, key := range []string{
-		"status_bar_clock", "active_pane_border", "cursor_shape", "cursor_blink",
+		"status_bar_clock", "status_bar_color", "active_pane_border", "cursor_shape", "cursor_blink",
 		"pane_number_timeout", "double_click_zoom", "keyboard_resize_step",
 		"automatic_window_names", "confirm_shutdown", "status_line_color", "copy_key",
 	} {
@@ -58,8 +58,9 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	st.setByID(settingCursorShape, 2)
 	st.setByID(settingCursorBlink, 0)
 	st.setByID(settingBorderColor, 1)
-	st.setByID(settingCopyKey, 1)         // Ctrl-Shift-X, away from the Ctrl-Y default
-	st.setByID(settingCopyStatusColor, 2) // Green, away from the Blue default
+	st.setByID(settingCopyKey, 1)                                    // Ctrl-Shift-X, away from the Ctrl-Y default
+	st.setByID(settingCopyStatusColor, statusColorIndex(t, "Green")) // away from the Blue default
+	st.setByID(settingStatusBarColor, statusColorIndex(t, "Navy"))
 	if err := writeConfig(path, &st); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -76,8 +77,11 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	if loaded.borderColor() != 39 {
 		t.Fatalf("loaded border color = %d, want cyan 39", loaded.borderColor())
 	}
-	if got, want := loaded.copyStatusStyle(), copyStatusPalette[2]; got != want {
+	if got, want := loaded.copyStatusStyle(), statusBarColors[statusColorIndex(t, "Green")]; got != want {
 		t.Fatalf("loaded copy status style = %+v, want %+v", got, want)
+	}
+	if got, want := loaded.statusBarStyle(), statusBarColors[statusColorIndex(t, "Navy")]; got != want {
+		t.Fatalf("loaded status bar style = %+v, want %+v", got, want)
 	}
 }
 
@@ -145,7 +149,7 @@ func TestSettingsAdjustAutoSavesAllValues(t *testing.T) {
 	s.configPath = filepath.Join(dir, "config.toml")
 	s.configLogPath = filepath.Join(dir, "server.log")
 	fireBinding(s, c, "s")
-	c.settingsCursor = 2 // Cursor shape
+	c.settingsCursor = settingCursorIndex(t, settingCursorShape)
 	s.handleInput(c, []byte("\x1b[C"))
 	if c.configWarningOpen {
 		t.Fatalf("auto-save unexpectedly warned: %+v", c.configWarning)
@@ -241,7 +245,7 @@ func TestSaveFailureKeepsValueAndWarnsOnlyTriggeringClient(t *testing.T) {
 	s.configPath = filepath.Join(blocker, "config.toml")
 	s.configLogPath = filepath.Join(dir, "server.log")
 	fireBinding(s, c, "s")
-	c.settingsCursor = 2 // Cursor shape
+	c.settingsCursor = settingCursorIndex(t, settingCursorShape)
 	s.handleInput(c, []byte("\x1b[C"))
 	if !c.configWarningOpen {
 		t.Fatal("save failure did not show a warning modal")

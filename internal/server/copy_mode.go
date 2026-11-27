@@ -17,13 +17,6 @@ const (
 	colCopySelectionFG int32 = 231
 	colCopyCursorBG    int32 = 46
 	colCopyCursorFG    int32 = 16
-	// Default palette of the copy-mode status line. It replaces the session
-	// status bar (grey 236), so its blue background is deliberately distinct;
-	// the settings page can pick another palette.
-	colCopyStatusBG  int32 = 24
-	colCopyStatusFG  int32 = 250
-	colCopyStatusKey int32 = 195
-
 	// OSC 52 payloads are capped so a huge selection cannot flood the
 	// client's terminal with an enormous escape sequence.
 	clipboardLimit = 64 * 1024
@@ -951,6 +944,6 @@ func (c *compositor) drawCopyStatusBar(setCell helpSetCell, opts *settingsState,
 			x++
 		}
 	}
-	put(label, style.key)
+	put(label, style.accent)
 	put(hint, style.fg)
 }

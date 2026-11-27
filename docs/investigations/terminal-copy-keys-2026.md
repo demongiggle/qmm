@@ -27,8 +27,8 @@ working copy/paste, which is what made this look like a qmm regression.
 and both selection paths compare the whole keystroke against it:
 
 - `internal/server/actions.go:499` — pending mouse selection
-- `internal/server/copy_mode.go:708` — copy mode
-- `internal/server/settings.go:647` — the mapping
+- `internal/server/copy_mode.go:701` — copy mode
+- `internal/server/settings.go:672` — the mapping
 
 | Setting | Bytes on the wire |
 | :--- | :--- |

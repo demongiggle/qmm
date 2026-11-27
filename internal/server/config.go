@@ -30,6 +30,7 @@ type fileConfig struct {
 
 type appearanceConfig struct {
 	StatusBarClock   string `toml:"status_bar_clock"`
+	StatusBarColor   string `toml:"status_bar_color"`
 	ActivePaneBorder string `toml:"active_pane_border"`
 	CursorShape      string `toml:"cursor_shape"`
 	CursorBlink      string `toml:"cursor_blink"`
@@ -87,6 +88,7 @@ func configFromSettings(st *settingsState) fileConfig {
 	return fileConfig{
 		Appearance: appearanceConfig{
 			StatusBarClock:   settingText(st, settingStatusClock),
+			StatusBarColor:   settingText(st, settingStatusBarColor),
 			ActivePaneBorder: settingText(st, settingBorderColor),
 			CursorShape:      settingText(st, settingCursorShape),
 			CursorBlink:      settingText(st, settingCursorBlink),
@@ -112,6 +114,7 @@ func configFromSettings(st *settingsState) fileConfig {
 func (fc fileConfig) orderedSettings() []configSetting {
 	return []configSetting{
 		{settingStatusClock, fc.Appearance.StatusBarClock},
+		{settingStatusBarColor, fc.Appearance.StatusBarColor},
 		{settingBorderColor, fc.Appearance.ActivePaneBorder},
 		{settingCursorShape, fc.Appearance.CursorShape},
 		{settingCursorBlink, fc.Appearance.CursorBlink},

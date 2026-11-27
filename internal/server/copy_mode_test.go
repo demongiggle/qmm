@@ -290,14 +290,15 @@ func TestCopyModeStaysInsideItsPane(t *testing.T) {
 	if strings.Contains(bar, "0:zsh*") {
 		t.Fatalf("session tabs survived under the copy status line:\n%s", bar)
 	}
-	if got := cellAt(f, 0, barY).BG; got != colCopyStatusBG {
-		t.Fatalf("copy status background = %d, want %d", got, colCopyStatusBG)
+	copyStyle := s.sess.opts().copyStatusStyle()
+	if got := cellAt(f, 0, barY).BG; got != copyStyle.bg {
+		t.Fatalf("copy status background = %d, want %d", got, copyStyle.bg)
 	}
-	if got := cellAt(f, 79, barY).BG; got != colCopyStatusBG {
+	if got := cellAt(f, 79, barY).BG; got != copyStyle.bg {
 		t.Fatalf("copy status line does not span the row: BG at col 79 = %d", got)
 	}
-	if colCopyStatusBG == colBarBG {
-		t.Fatal("copy and session status lines share a background color")
+	if copyStyle == s.sess.opts().statusBarStyle() {
+		t.Fatal("copy and session status lines share a palette")
 	}
 	if len(f.Tabs) != 0 {
 		t.Error("the covered session bar should not keep tab hit zones")
@@ -308,21 +309,34 @@ func TestCopyStatusLineColorSetting(t *testing.T) {
 	s, c, _ := newCopyModeFixture(80, 24, []copyLine{lineOf("hello")})
 	s.broadcast()
 	barY := 23
-	if got := cellAt(*c.frame, 0, barY).BG; got == colBarBG {
-		t.Fatalf("default copy status background = session bar %d", got)
+	if got, want := cellAt(*c.frame, 0, barY).BG, s.sess.opts().copyStatusStyle().bg; got != want {
+		t.Fatalf("default copy status background = %d, want Blue %d", got, want)
 	}
-	if got, want := cellAt(*c.frame, 0, barY).BG, copyStatusPalette[0].bg; got != want {
-		t.Fatalf("default copy status background = %d, want %d", got, want)
+	if s.sess.opts().copyStatusStyle().bg == s.sess.opts().statusBarStyle().bg {
+		t.Fatal("default copy and session status lines share a background")
 	}
 
-	s.sess.opts().setByID(settingCopyStatusColor, 2)
+	green := statusColorIndex(t, "Green")
+	s.sess.opts().setByID(settingCopyStatusColor, green)
 	s.broadcast()
-	if got, want := cellAt(*c.frame, 0, barY).BG, copyStatusPalette[2].bg; got != want {
+	if got, want := cellAt(*c.frame, 0, barY).BG, statusBarColors[green].bg; got != want {
 		t.Fatalf("copy status background = %d, want configured %d", got, want)
 	}
-	if got, want := cellAt(*c.frame, 1, barY).FG, copyStatusPalette[2].key; got != want {
+	if got, want := cellAt(*c.frame, 1, barY).FG, statusBarColors[green].accent; got != want {
 		t.Fatalf("copy status label FG = %d, want %d", got, want)
 	}
+}
+
+// statusColorIndex resolves a palette name so tests do not depend on order.
+func statusColorIndex(t *testing.T, name string) int {
+	t.Helper()
+	for i, n := range statusBarNames {
+		if n == name {
+			return i
+		}
+	}
+	t.Fatalf("status color %q missing from the palette", name)
+	return 0
 }
 
 func TestCopyModeFollowsPaneRect(t *testing.T) {

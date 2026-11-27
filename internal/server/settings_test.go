@@ -10,6 +10,23 @@ import (
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
+// settingCursorIndex returns the settings-page cursor position of one option,
+// so tests keep working when rows are added or reordered.
+func settingCursorIndex(t *testing.T, id settingID) int {
+	t.Helper()
+	cursor := 0
+	for _, section := range settingsSections {
+		for _, def := range section.Options {
+			if def.ID == id {
+				return cursor
+			}
+			cursor++
+		}
+	}
+	t.Fatalf("setting %q is not in the settings page", id)
+	return 0
+}
+
 func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	if !isExactBinding("s") {
 		t.Fatal("prefix s is not registered")
@@ -29,14 +46,24 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	text := frameText(f)
 	for _, want := range []string{
 		"QMM SETTINGS", "Appearance", "Panes", "Layout", "Session",
-		"Status bar clock", "Active pane border", "Cursor shape", "Cursor blink",
+		"Status bar clock", "Status bar color", "[Slate]",
+		"Active pane border", "Cursor shape", "Cursor blink",
 		"Pane number timeout", "Double-click zoom", "Keyboard resize step",
 		"Automatic window names", "Confirm shutdown", "[On]", "[Green]",
-		"[Block]", "[Off]", "[2s]", "[2 cells]", "Copy mode", "Status line color",
-		"[Blue]", "r reload", "q close",
+		"[Block]", "[Off]", "[2s]", "[2 cells]", "Copy mode", "r reload", "q close",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("settings frame missing %q:\n%s", want, text)
+		}
+	}
+	// The page scrolls by one row at 80x24; End reveals the Copy mode options.
+	s.handleInput(c, []byte("\x1b[F"))
+	text = frameText(*c.frame)
+	for _, want := range []string{
+		"Copy mode", "Status line color", "[Blue]", "Copy selection key", "[Ctrl-Y]",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("scrolled settings frame missing %q:\n%s", want, text)
 		}
 	}
 	if f.CursorVisible || len(f.Panes) != 0 || len(f.Splitters) != 0 || len(f.Tabs) != 0 {
@@ -61,6 +88,11 @@ func TestSettingsNavigationAndAdjustment(t *testing.T) {
 	s.handleInput(c, []byte("\x1b[B"))
 	if c.settingsCursor != 1 {
 		t.Fatalf("down arrow cursor = %d, want 1", c.settingsCursor)
+	}
+	// The active pane border sits below the status-bar rows.
+	s.handleInput(c, []byte("\x1b[B"))
+	if want := settingCursorIndex(t, settingBorderColor); c.settingsCursor != want {
+		t.Fatalf("cursor = %d, want Active pane border at %d", c.settingsCursor, want)
 	}
 	s.handleInput(c, []byte("\x1b[C"))
 	if got := s.sess.opts().borderColor(); got != 39 {
@@ -180,6 +212,28 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 		off := (&compositor{}).compose(s, 80, 24, true)
 		if got := cellAt(off, 72, 23).Ch; got != ' ' {
 			t.Fatalf("clock hidden cell = %q, want blank", got)
+		}
+	})
+
+	t.Run("status bar color", func(t *testing.T) {
+		s := newTestSession()
+		f := (&compositor{}).compose(s, 80, 24, true)
+		// Column 60 is empty bar, past the single window tab and before the clock.
+		if got := cellAt(f, 60, 23).BG; got != colBarBG {
+			t.Fatalf("default status bar BG = %d, want the Slate palette %d", got, colBarBG)
+		}
+		navy := statusColorIndex(t, "Navy")
+		s.opts().setByID(settingStatusBarColor, navy)
+		f = (&compositor{}).compose(s, 80, 24, true)
+		if got := cellAt(f, 60, 23).BG; got != statusBarColors[navy].bg {
+			t.Fatalf("status bar BG = %d, want Navy %d", got, statusBarColors[navy].bg)
+		}
+		if got := cellAt(f, 60, 23).FG; got != statusBarColors[navy].fg {
+			t.Fatalf("status bar FG = %d, want Navy %d", got, statusBarColors[navy].fg)
+		}
+		// The active tab keeps the border color, whatever the bar color is.
+		if got := cellAt(f, 0, 23); got.BG != colBarActiveBG || got.FG != colBarActiveFG {
+			t.Fatalf("active tab colors = %d/%d, want %d/%d", got.FG, got.BG, colBarActiveFG, colBarActiveBG)
 		}
 	})
 
@@ -312,9 +366,47 @@ func TestSettingsOverlayIsPerClientButValuesAreShared(t *testing.T) {
 	c2.settingsOpen = true
 	c2.forceFull = true
 	s.broadcast()
-	s.handleInput(c1, []byte("\x1b[B"))
+	for c1.settingsCursor < settingCursorIndex(t, settingBorderColor) {
+		s.handleInput(c1, []byte("\x1b[B"))
+	}
 	s.handleInput(c1, []byte("\x1b[C")) // Green -> Cyan, shared value
 	if !strings.Contains(frameText(*c2.frame), "Cyan") {
 		t.Error("second client's settings page did not see the shared value")
+	}
+}
+
+// TestStatusBarPaletteIsRichAndConsistent guards the shared status-bar palette:
+// both bars pick from it, so names must stay unique and every choice readable.
+func TestStatusBarPaletteIsRichAndConsistent(t *testing.T) {
+	if len(statusBarNames) != len(statusBarColors) {
+		t.Fatalf("palette names = %d, colors = %d", len(statusBarNames), len(statusBarColors))
+	}
+	if len(statusBarNames) < 10 {
+		t.Fatalf("palette has %d choices, want at least 10", len(statusBarNames))
+	}
+	names := map[string]bool{}
+	backgrounds := map[int32]bool{}
+	for i, name := range statusBarNames {
+		if names[name] {
+			t.Errorf("duplicate palette name %q", name)
+		}
+		names[name] = true
+		style := statusBarColors[i]
+		if backgrounds[style.bg] {
+			t.Errorf("duplicate palette background %d", style.bg)
+		}
+		backgrounds[style.bg] = true
+		if style.bg < 16 || style.bg > 236 {
+			t.Errorf("%s background %d is not a dark palette shade", name, style.bg)
+		}
+		if style.fg < 240 && style.fg != colBarFG {
+			t.Errorf("%s text color %d may be unreadable on its background", name, style.fg)
+		}
+	}
+	// Configs written by older builds name these values; keep them valid.
+	for _, name := range []string{"Blue", "Purple", "Green", "Amber"} {
+		if !names[name] {
+			t.Errorf("legacy palette name %q disappeared", name)
+		}
 	}
 }
