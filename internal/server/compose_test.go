@@ -291,3 +291,69 @@ func TestComposePreservesBackgroundOnVimLineScroll(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeWideGlyphHalfCellsKeepBackground(t *testing.T) {
+	s := newTestSession()
+	p := s.panes[1]
+	comp := &compositor{}
+
+	// Mixed double-width runes and plain ASCII with Normal background 235.
+	// vt10x keeps one cell per rune: 日本語A行 sit in vt columns 0..5, but
+	// 日, 本, 語 and 行 each occupy two terminal columns when shown.
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J日本語 A行")); err != nil {
+		t.Fatalf("write wide screen: %v", err)
+	}
+	f := comp.compose(s, 80, 24, true)
+
+	// Every rune must be rendered, in order, at its expanded column. The old
+	// skip logic dropped runes stored at odd vt columns next to a wide one.
+	want := map[int]rune{0: '日', 2: '本', 4: '語', 6: ' ', 7: 'A', 8: '行'}
+	for x, ch := range want {
+		if got := cellAt(f, x, 0); got.Ch != ch {
+			t.Errorf("cell (%d,0) = %q, want %q", x, got.Ch, ch)
+		}
+	}
+	// The second half of each double-width rune keeps the glyph's colors
+	// instead of falling back to a stray default-background gap.
+	for _, x := range []int{1, 3, 5, 9} {
+		if got := cellAt(f, x, 0); got.BG != 235 {
+			t.Errorf("half cell (%d,0) BG = %d, want 235", x, got.BG)
+		}
+	}
+	// Nothing else on the row may fall back to the default background.
+	for x := 0; x < 39; x++ {
+		if got := cellAt(f, x, 0); got.BG == protocol.ColorDefault {
+			t.Errorf("cell (%d,0) fell back to default BG: %+v", x, got)
+		}
+	}
+	// The caret column follows the same expansion as the glyphs: three wide
+	// runes, one space and "A" fill columns 0..7, 行 covers 8..9.
+	if f.CursorX != 10 || f.CursorY != 0 {
+		t.Errorf("cursor at (%d,%d), want (10,0)", f.CursorX, f.CursorY)
+	}
+}
+
+func TestComposeWideGlyphScrollKeepsBackground(t *testing.T) {
+	s := newTestSession()
+	p := s.panes[1]
+	comp := &compositor{}
+
+	// Two CJK lines, then the vim scroll sequence: the DECSTBM line scroll
+	// relies on BCE to keep BG 235 in the freshly exposed row, including the
+	// trailing half-cells of wide runes in the row above.
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J日本語\r\n中文\r\n\x1b[3;1H")); err != nil {
+		t.Fatalf("write wide screen: %v", err)
+	}
+	f := comp.compose(s, 80, 24, true)
+
+	// Rows 0 and 1 must be free of default-background cells: both halves of
+	// the wide runes and everything scrolled past them keep BG 235.
+	for _, y := range []int{0, 1} {
+		for x := 0; x < 39; x++ {
+			c := cellAt(f, x, y)
+			if c.BG == protocol.ColorDefault && c.Ch == ' ' {
+				t.Errorf("cell (%d,%d) is a blank default-BG gap", x, y)
+			}
+		}
+	}
+}

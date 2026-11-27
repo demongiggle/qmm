@@ -412,12 +412,35 @@ type vtCursor struct {
 	visible bool
 }
 
+// vtRuneWidth reports how many terminal columns a rune occupies. vt10x stores
+// one cell per rune regardless of width, and combining marks on their own
+// still have to claim a column, so anything below one counts as one.
+func vtRuneWidth(ch rune) int {
+	w := uniseg.StringWidth(string(ch))
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
 func (p *pane) vtCursor() vtCursor {
 	p.vt.Lock()
 	defer p.vt.Unlock()
 	cur := p.vt.Cursor()
 	vis := p.vt.CursorVisible()
-	return vtCursor{x: cur.X, y: cur.Y, visible: vis}
+	// blitPane expands double-width runes into two columns, so the caret
+	// column must go through the same expansion or it lands on the wrong
+	// cell whenever the row contains wide characters.
+	cols, _ := p.vt.Size()
+	x := 0
+	for i := 0; i < cur.X && i < cols; i++ {
+		ch := p.vt.Cell(i, cur.Y).Char
+		if ch == 0 {
+			ch = ' '
+		}
+		x += vtRuneWidth(ch)
+	}
+	return vtCursor{x: x, y: cur.Y, visible: vis}
 }
 
 // vtColor translates a vt10x color into the protocol's color encoding.
@@ -441,12 +464,12 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 	p.vt.Lock()
 	cols, rows := p.vt.Size()
 	for y := 0; y < r.H && y < rows; y++ {
-		skip := 0
-		for x := 0; x < r.W && x < cols; x++ {
-			if skip > 0 {
-				skip--
-				continue
-			}
+		// vt10x keeps one vt cell per rune, while the pane grid is measured in
+		// terminal columns. Double-width runes expand into two rendered cells
+		// and every later cell shifts right, so rx tracks the rendered column
+		// of the current vt cell.
+		rx := 0
+		for x := 0; x < cols && rx < r.W; x++ {
 			g := p.vt.Cell(x, y)
 			ch := g.Char
 			if ch == 0 {
@@ -469,10 +492,21 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 			if g.Mode&gttrReverse != 0 {
 				st |= protocol.StyleReverse
 			}
-			if uniseg.StringWidth(string(ch)) == 2 {
-				skip = 1
+			w := vtRuneWidth(ch)
+			if rx+w > r.W {
+				// The rune does not fit in the pane's final column, so the
+				// rest of the row is clipped at the right edge.
+				break
 			}
-			setCell(r.X+x, r.Y+y, ch, fg, bg, st)
+			setCell(r.X+rx, r.Y+y, ch, fg, bg, st)
+			for k := 1; k < w; k++ {
+				// Trailing half-cells keep the glyph's colors. A plain default
+				// cell here would paint a stray gap after every double-width
+				// rune; Vim's BCE scroll leaves the background alive in that
+				// position, so it must survive blitting.
+				setCell(r.X+rx+k, r.Y+y, ' ', fg, bg, st)
+			}
+			rx += w
 		}
 	}
 	p.vt.Unlock()
