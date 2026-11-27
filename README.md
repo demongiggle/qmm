@@ -401,6 +401,13 @@ file path. Environment variables:
 - `QMM_SOCKET_DIR` — override the socket directory, useful for testing
 - `QMM_CONFIG` — override the full config file path, useful for testing
 - `QMM_DEBUG_LOG` — append client-side input events to this file
+- `QMM_ALLOW_NESTED` — allow attaching to the session this terminal is a pane
+  of. qmm refuses that by default: panes export `QMM_SESSION`, and a client
+  started from a pane that attached back to its own session would nest qmm
+  inside itself, shrinking the session by one row per resize round until it
+  collapses to "terminal too small". The guard reads the inherited environment,
+  so it works the same in any pane shell; launchers that scrub it (`sudo`,
+  `ssh` without `SendEnv`, `env -i`) bypass the guard.
 
 ## Development
 

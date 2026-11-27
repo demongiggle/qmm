@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -372,7 +373,35 @@ func execArgsForSwitch(req *client.SwitchRequest) []string {
 	return []string{"qmm", "attach"}
 }
 
+// nestedAttachError refuses to attach to the session whose pane this process
+// runs in. Every qmm pane exports QMM_SESSION, so a client started from that
+// pane inherits the name of its own session; attaching back to it nests qmm in
+// itself: the server's min-of-clients policy then shrinks the session by one
+// row per resize round (a pane is always a status row shorter than the
+// session), and the client's own drawing becomes that pane's output, so the two
+// feed each other until the session collapses to "terminal too small".
+//
+// The check reads the inherited environment directly, so it does not depend on
+// the pane's shell syntax. Set QMM_ALLOW_NESTED to any non-empty value to
+// override it, e.g. when a stale marker was carried into a shell that no longer
+// feeds the session. Environment-scrubbing launchers (sudo, ssh without
+// SendEnv, env -i) drop the marker and therefore bypass the guard; the
+// server-side size policy has to stay the safety net for that case.
+func nestedAttachError(sock string) error {
+	if os.Getenv("QMM_ALLOW_NESTED") != "" {
+		return nil
+	}
+	inside := os.Getenv("QMM_SESSION")
+	if inside == "" || inside != filepath.Base(sock) {
+		return nil
+	}
+	return fmt.Errorf("this terminal is a pane of session %q — attaching to it from inside would nest qmm in itself; open a new terminal window, or clear the QMM_SESSION variable (or set QMM_ALLOW_NESTED) to override", inside)
+}
+
 func attach(sock string) error {
+	if err := nestedAttachError(sock); err != nil {
+		return err
+	}
 	req, err := client.AttachWithSwitch(sock)
 	if err != nil {
 		return err

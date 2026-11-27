@@ -72,6 +72,40 @@ func TestExecArgsForSwitch(t *testing.T) {
 	}
 }
 
+func TestNestedAttachError(t *testing.T) {
+	tests := []struct {
+		name      string
+		inside    string
+		allow     string
+		sock      string
+		wantError bool
+	}{
+		{name: "outside any qmm pane", inside: "", sock: "/run/qmm/dev"},
+		{name: "other session", inside: "dev", sock: "/run/qmm/work"},
+		{name: "same session", inside: "dev", sock: "/run/qmm/dev", wantError: true},
+		{name: "override", inside: "dev", allow: "1", sock: "/run/qmm/dev"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("QMM_SESSION", tc.inside)
+			t.Setenv("QMM_ALLOW_NESTED", tc.allow)
+			err := nestedAttachError(tc.sock)
+			if tc.wantError {
+				if err == nil {
+					t.Fatal("expected a nested-attach error")
+				}
+				if !strings.Contains(err.Error(), `"dev"`) || !strings.Contains(err.Error(), "nest") {
+					t.Fatalf("error = %v, want the session name and nesting hint", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("nestedAttachError(%q) = %v, want nil", tc.sock, err)
+			}
+		})
+	}
+}
+
 func TestRunListEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	var out strings.Builder
