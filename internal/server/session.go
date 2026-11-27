@@ -46,9 +46,12 @@ type window struct {
 
 // session is one qmm session: a named set of windows.
 type session struct {
-	name       string
-	windows    map[int]*window
-	active     int
+	name    string
+	windows map[int]*window
+	active  int
+	// last is the window active before the current one (-1 when unknown).
+	// prefix+l (last-window) toggles back to it.
+	last       int
 	nextPaneID int
 	panes      map[int]*pane
 	settings   settingsState
@@ -72,6 +75,7 @@ func newSession() *session {
 		windows:  map[int]*window{},
 		panes:    map[int]*pane{},
 		settings: defaultSettings(),
+		last:     -1,
 	}
 	return s
 }
@@ -98,6 +102,21 @@ func (s *session) windowPaneIDs(w *window) []int {
 }
 
 func (s *session) activeWindow() *window { return s.windows[s.active] }
+
+// setActiveWindow switches the active window and records the previous one so
+// last-window (prefix+l) can toggle back. Every window switch goes through
+// here: explicit selection, cycling, and new-window creation. The automatic
+// fallback after a window's last pane exits keeps its own direct assignment
+// because the window it would record as "last" was just deleted.
+func (s *session) setActiveWindow(idx int) {
+	if _, ok := s.windows[idx]; !ok {
+		return
+	}
+	if idx != s.active {
+		s.last = s.active
+	}
+	s.active = idx
+}
 
 // lowestFreeIndex returns the smallest non-negative unused window index.
 func (s *session) lowestFreeIndex() int {
@@ -252,7 +271,7 @@ func (s *session) newWindow(cols, rows int) (*window, error) {
 	w.tree = layout.New(p.id)
 	w.activePane = p.id
 	s.windows[idx] = w
-	s.active = idx
+	s.setActiveWindow(idx)
 	w.name = fmt.Sprintf("window %d", idx)
 	if s.opts().autoNameWindows() {
 		if n, _ := fgInfo(p); n != "" {

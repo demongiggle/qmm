@@ -20,6 +20,7 @@ func newTestSession() *session {
 	tree.Split(1, 2, layout.Vertical)
 	s.windows[0] = &window{index: 0, tree: tree, activePane: 1, name: "zsh"}
 	s.active = 0
+	s.last = -1
 	s.panes[1] = &pane{id: 1, vt: vt10x.New(vt10x.WithSize(39, 23))}
 	s.panes[2] = &pane{id: 2, vt: vt10x.New(vt10x.WithSize(39, 23))}
 	return s
@@ -377,6 +378,7 @@ func TestComposeWideGlyphRightEdgeClip(t *testing.T) {
 		panes:      map[int]*pane{},
 		nextPaneID: 3,
 		settings:   defaultSettings(),
+		last:       -1,
 	}
 	tree := layout.New(1)
 	tree.Split(1, 2, layout.Vertical)
@@ -420,6 +422,7 @@ func TestComposeWideGlyphCaretStaysInsidePane(t *testing.T) {
 		panes:      map[int]*pane{},
 		nextPaneID: 3,
 		settings:   defaultSettings(),
+		last:       -1,
 	}
 	tree := layout.New(1)
 	tree.Split(1, 2, layout.Vertical)

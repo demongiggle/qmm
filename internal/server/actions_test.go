@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
 func TestTranslateAppCursor(t *testing.T) {
@@ -111,6 +113,47 @@ func TestHomeEndForwardingRespectsAppCursorMode(t *testing.T) {
 		t.Fatalf("modified pane input = %q, want %q", got, want)
 	}
 }
+
+// TestLastWindowBindingTogglesBack covers prefix+l (tmux last-window): the
+// previous window is recorded on every switch, the chord toggles between the
+// two windows, and a deleted last window degrades to a no-op.
+func TestLastWindowBindingTogglesBack(t *testing.T) {
+	if !isExactBinding("l") {
+		t.Fatal("prefix l is not registered")
+	}
+	s, c := newHelpServer(80, 24)
+	// A second window with its own pane, the way prefix+c would create it.
+	s.sess.windows[1] = &window{index: 1, tree: layout.New(3), activePane: 3, name: "other"}
+	s.sess.panes[3] = &pane{id: 3, vt: vt10x.New(vt10x.WithSize(39, 23))}
+
+	// Selecting it records window 0 as the last window.
+	s.selectWindow(1)
+	if got := (sessionPos{s.sess.active, s.sess.last}); got != (sessionPos{1, 0}) {
+		t.Fatalf("after select: active=%d last=%d, want 1/0", got.active, got.last)
+	}
+
+	// prefix+l switches back, and pressing it again returns to window 1.
+	s.handleInput(c, []byte("\x01l"))
+	if got := (sessionPos{s.sess.active, s.sess.last}); got != (sessionPos{0, 1}) {
+		t.Fatalf("after last-window: active=%d last=%d, want 0/1", got.active, got.last)
+	}
+	s.handleInput(c, []byte("\x01l"))
+	if got := (sessionPos{s.sess.active, s.sess.last}); got != (sessionPos{1, 0}) {
+		t.Fatalf("after second last-window: active=%d last=%d, want 1/0", got.active, got.last)
+	}
+
+	// Once the last window is gone the chord is a no-op and clears the
+	// stale pointer instead of switching to a dead window.
+	delete(s.sess.windows, 0)
+	s.handleInput(c, []byte("\x01l"))
+	if got := (sessionPos{s.sess.active, s.sess.last}); got != (sessionPos{1, -1}) {
+		t.Fatalf("after stale last-window: active=%d last=%d, want 1/-1", got.active, got.last)
+	}
+}
+
+// sessionPos compares active/last pairs in TestLastWindowBindingTogglesBack.
+type sessionPos struct{ active, last int }
+
 func TestSplitPrefixBindings(t *testing.T) {
 	// "|" and "-" replace the tmux-style "%" and "\"" split keys.
 	for _, seq := range []string{"|", "-"} {

@@ -39,6 +39,7 @@ var helpSections = []helpSection{
 		Items: []helpItem{
 			{"C-a c", "New window"},
 			{"C-a n / p", "Next / previous"},
+			{"C-a l", "Last window"},
 		},
 	},
 	{
@@ -244,24 +245,34 @@ func trimHelpBlock(lines []helpLine) []helpLine {
 	return lines
 }
 
+// packHelpBlocks distributes whole sections across columns. Sections never
+// split across columns, and blocks already inside a column keep one blank
+// line between them. Each block's trailing blank is only a separator, so it
+// is not reserved when the block lands last in its column (trimHelpBlock
+// drops it there); reserving it would waste the final content row.
 func packHelpBlocks(blocks [][]helpLine, count, maxRows int) ([][]helpLine, bool) {
 	columns := make([][]helpLine, count)
 	sizes := make([]int, count)
 	for _, block := range blocks {
+		lines := trimHelpBlock(block)
 		best := 0
 		for i := 1; i < count; i++ {
 			if sizes[i] < sizes[best] {
 				best = i
 			}
 		}
-		if sizes[best]+len(block) > maxRows {
+		need := len(lines)
+		if len(columns[best]) > 0 {
+			need++ // blank separator before this block
+		}
+		if need > maxRows-sizes[best] {
 			return nil, false
 		}
-		columns[best] = append(columns[best], block...)
-		sizes[best] += len(block)
-	}
-	for i := range columns {
-		columns[i] = trimHelpBlock(columns[i])
+		if len(columns[best]) > 0 {
+			columns[best] = append(columns[best], helpLine{blank: true})
+		}
+		columns[best] = append(columns[best], lines...)
+		sizes[best] += need
 	}
 	return columns, true
 }

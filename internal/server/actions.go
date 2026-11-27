@@ -294,7 +294,7 @@ func (s *Server) selectWindow(i int) {
 		return
 	}
 	if s.sess.active != i {
-		s.sess.active = i
+		s.sess.setActiveWindow(i)
 		s.broadcast()
 	}
 }
@@ -403,7 +403,25 @@ func (s *Server) cycleWindow(delta int) {
 		}
 	}
 	pos = (pos + delta + len(idxs)) % len(idxs)
-	s.sess.active = idxs[pos]
+	s.sess.setActiveWindow(idxs[pos])
+	s.broadcast()
+}
+
+// lastWindow switches back to the window that was active immediately before
+// the current one (tmux last-window, prefix+l). Because every switch records
+// the previous window, pressing l twice toggles between the two windows. A
+// stale pointer — the last window's panes all exited in the meantime — is
+// cleared so the chord becomes an accepted no-op.
+func (s *Server) lastWindow() {
+	if s.sess.last < 0 || s.sess.last == s.sess.active {
+		return
+	}
+	i := s.sess.last
+	if _, ok := s.sess.windows[i]; !ok {
+		s.sess.last = -1
+		return
+	}
+	s.sess.setActiveWindow(i)
 	s.broadcast()
 }
 
@@ -497,6 +515,8 @@ var prefixBindings = []prefixBinding{
 	prefixBind("c", func(s *Server, c *clientConn) { s.newWindow() }),
 	prefixBind("n", func(s *Server, c *clientConn) { s.cycleWindow(1) }),
 	prefixBind("p", func(s *Server, c *clientConn) { s.cycleWindow(-1) }),
+	// tmux-style last-window: toggle back to the previously active window.
+	prefixBind("l", func(s *Server, c *clientConn) { s.lastWindow() }),
 	prefixBind("x", func(s *Server, c *clientConn) { s.killActivePane() }),
 	// tmux uses prefix+& for a confirmed destructive close. qmm has one
 	// session, so the chord normally asks before shutting down the whole

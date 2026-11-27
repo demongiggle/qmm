@@ -108,6 +108,7 @@ Inside qmm, press Ctrl-a to send a command prefix, followed by:
   -         split top/bottom (new pane below)
   c         new window
   n / p     next / previous window
+  l         back to last window
   x         kill current pane
   &         shut down session (confirm with y, cancel with n/Esc)
   o         cycle to next pane
