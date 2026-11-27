@@ -46,6 +46,7 @@ var helpSections = []helpSection{
 	{
 		Title: "Layout",
 		Items: []helpItem{
+			{"C-a L", "Saved layouts"},
 			{"C-a z", "Floating zoom"},
 			{"C-a C-←/→/↑/↓", "Resize pane (repeat)"},
 		},
@@ -110,6 +111,7 @@ func (s *Server) openHelp(c *clientConn) {
 	c.settingsOpen = false
 	c.sessionsOpen = false
 	c.sessionsNaming = false
+	c.resetLayoutsMenu()
 	c.forceFull = true
 	c.clearRepeat()
 	s.broadcast()

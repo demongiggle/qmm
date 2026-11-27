@@ -117,6 +117,7 @@ Inside qmm, press Ctrl-a to send a command prefix, followed by:
   Ctrl-← →  resize pane; hold Ctrl to repeat (also: Ctrl-↑ Ctrl-↓)
   s         settings
   S         sessions menu (switch or launch a fresh session)
+  L         saved layouts (restore into a new window, save, delete)
   d         detach (session keeps running)
   Ctrl-a    send a literal Ctrl-a to the application
   ?         show categorized key help (Esc/q closes)

@@ -579,6 +579,7 @@ func (s *Server) openSettings(c *clientConn) {
 	c.confirmOpen = false
 	c.sessionsOpen = false
 	c.sessionsNaming = false
+	c.resetLayoutsMenu()
 	c.displayPanesOpen = false
 	c.displayPanesInput = ""
 	c.displayPanesDeadline = time.Time{}

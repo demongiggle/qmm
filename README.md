@@ -54,6 +54,7 @@ status bar), toggle back with `Ctrl-a` `z` again, open a new window with
 | :--- | :--- |
 | **A session that stays alive** | A detached server owns the PTYs and terminal state. `Ctrl-a` `d` disconnects; `qmm attach` brings every pane and window back. |
 | **Layouts that follow your work** | Split panes left/right or top/bottom into a binary tree, resize by dragging a divider or with repeatable Ctrl-arrow keys, and land directly in every newly created pane or window. |
+| **Layouts you can keep** | Save the active window's pane tree and each pane's running command as a named template; `Ctrl-a` `L` restores it into a new window or deletes it. |
 | **Windows with context built in** | A status bar highlights the active window with `*`, flags zoom with `Z`, and can name windows automatically after the foreground process. |
 | **Navigation without a detour** | `Ctrl-a` `o` cycles panes, `Ctrl-a` `q` overlays large pane numbers for instant jumps, and `Ctrl-a` `Ctrl-a` sends a literal Ctrl-a to the application. |
 | **Mouse-ready, keyboard-complete** | Click to focus, double-click to zoom, click a status-bar tab to switch windows, or drag a divider to resize. Every core action also has a keyboard path. |
@@ -180,6 +181,7 @@ Your shells, windows, and layout are still there.
 | `Ctrl-a` `o` | Cycle to next pane |
 | `Ctrl-a` `q` | Show pane numbers / jump to pane |
 | `Ctrl-a` `s` | Open categorized settings |
+| `Ctrl-a` `L` | Saved layouts (restore / save / delete) |
 | `Ctrl-a` `x` | Close current pane |
 | `Ctrl-a` `&` | Shut down session (confirm) |
 | `Ctrl-a` `z` | Toggle floating pane zoom |
@@ -292,6 +294,38 @@ settings page. If the file is broken, qmm backs it up as
 `config.toml.<timestamp>.bak`, writes a fresh default, logs the reason and paths
 in `server.log`, and shows a one-time warning dialog on the first attached
 client.
+
+### Saved layouts
+
+`Ctrl-a` `L` opens the saved-layout menu for the attached client. A layout is a
+reusable template for one window: its split tree plus each pane's foreground
+command line and working directory at save time.
+
+- `s`, or Enter on **+ Save current window**, prompts for a name. Names use
+  letters, digits, `.`, `_`, and `-` (up to 32 characters). Enter with an empty
+  name picks `layout-N`. Saving over an existing name asks for `y/n`
+  confirmation.
+- Enter on a saved layout restores it into a new window and makes that window
+  active; the current window is untouched. The new window is named after the
+  layout and keeps that name instead of automatic process renaming.
+- `d` deletes the selected saved layout after `y/n` confirmation.
+- `q`, `Esc`, `Ctrl-c`, or `Ctrl-a` `L` closes the menu; on short terminals the
+  list scrolls like help and settings.
+
+Each pane restores its foreground command (the full argv) in its saved working
+directory. Idle shell panes reopen `$SHELL -l` in the saved directory instead.
+Restored commands run directly, not through a shell, so shell builtins,
+history, aliases, pipes, redirections, and the original environment are not
+reconstructed. A restored command closes its pane when it exits, matching the
+normal qmm pane lifecycle. If a saved command can no longer start, qmm opens a
+shell in the saved directory, logs the failure, and rings the bell.
+
+Layouts persist in `layouts.toml` in the same directory as `config.toml`
+(including when `QMM_CONFIG` points elsewhere) with `0600` permissions and
+atomic writes. The menu reloads the file when it opens. A malformed file is
+backed up as `layouts.toml.<timestamp>.bak`; a file written by a newer qmm is
+reported and left untouched. Because the file stores command arguments, treat
+it like shell history.
 
 ### Scrollback and vim-style copy mode
 

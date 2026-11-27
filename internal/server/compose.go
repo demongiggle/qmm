@@ -82,6 +82,17 @@ type compositor struct {
 	sessionsInput   string
 	sessionsError   string
 
+	layoutsOpen             bool
+	layoutsList             []savedLayout
+	layoutsCursor           int
+	layoutsTop              int
+	layoutsNaming           bool
+	layoutsInput            string
+	layoutsError            string
+	layoutsMessage          string
+	layoutsConfirmOverwrite string
+	layoutsConfirmDelete    string
+
 	copyMode *copyModeState
 
 	// selection is a mouse drag selection: a frozen snapshot of one pane that
@@ -133,6 +144,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			c.drawHelp(&frame, setCell, cols, rows)
 		} else if c.sessionsOpen {
 			c.drawSessionsMenu(&frame, setCell, cols, rows, s.sessionName(), opts)
+		} else if c.layoutsOpen {
+			c.drawLayoutsMenu(&frame, setCell, cols, rows, nextLayoutName(c.layoutsList))
 		} else if c.settingsOpen {
 			c.drawSettings(&frame, setCell, cols, rows, opts)
 		} else if c.displayPanes {
