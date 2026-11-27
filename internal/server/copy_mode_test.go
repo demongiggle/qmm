@@ -305,6 +305,47 @@ func TestCopyModeStaysInsideItsPane(t *testing.T) {
 	}
 }
 
+func TestCopyModeStartsAtPaneCursor(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	p := s.sess.activePane()
+	_, _ = p.vt.Write([]byte("first\r\nsecond\r\nthird"))
+	s.openCopyMode(c, 0)
+	st := c.copyMode
+	if st == nil || !st.open {
+		t.Fatal("prefix+[ did not open copy mode")
+	}
+	// The view opens on the pane's cursor, not on the last buffer line.
+	if want := (copyPoint{line: 2, col: 5}); st.cursor != want {
+		t.Fatalf("copy cursor = %+v, want the pane cursor %+v", st.cursor, want)
+	}
+	if st.top != st.maxTop() {
+		t.Fatalf("copy top = %d, want the buffer bottom %d", st.top, st.maxTop())
+	}
+	// The highlight is drawn on the cursor cell of the live screen.
+	cur := cellAt(*c.frame, st.rect.X+5, st.rect.Y+2)
+	if cur.BG != colCopyCursorBG || cur.FG != colCopyCursorFG {
+		t.Fatalf("cursor cell BG/FG = %d/%d, want %d/%d", cur.BG, cur.FG, colCopyCursorBG, colCopyCursorFG)
+	}
+
+	// Scrollback shifts the live screen down, so the same pane cursor maps to a
+	// later buffer line and the view still shows its bottom.
+	p.sb = newScrollback(st.rect.W, st.rect.H)
+	writeScrollbackLines(p.sb, 30, "hist")
+	s.closeCopyMode(c)
+	s.openCopyMode(c, 0)
+	st = c.copyMode
+	history := len(p.sb.History())
+	if history == 0 {
+		t.Fatal("fixture scrollback is empty")
+	}
+	if want := (copyPoint{line: history + 2, col: 5}); st.cursor != want {
+		t.Fatalf("cursor with %d history lines = %+v, want %+v", history, st.cursor, want)
+	}
+	if st.top != st.maxTop() {
+		t.Fatalf("top with history = %d, want the buffer bottom %d", st.top, st.maxTop())
+	}
+}
+
 func TestCopyStatusLineColorSetting(t *testing.T) {
 	s, c, _ := newCopyModeFixture(80, 24, []copyLine{lineOf("hello")})
 	s.broadcast()

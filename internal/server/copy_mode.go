@@ -470,19 +470,22 @@ func (s *Server) openCopyMode(c *clientConn, scrollUp int) {
 	if !ok || rect.W < 1 || rect.H < 1 {
 		return
 	}
-	lines := p.copyBuffer()
+	lines, cursor := p.copyBufferAtCursor()
 	if len(lines) == 0 {
 		lines = []copyLine{blankCopyLine(rect.W)}
+		cursor = copyPoint{}
 	}
 	st := &copyModeState{
 		open:   true,
 		paneID: p.id,
 		lines:  lines,
 		rect:   rect,
+		cursor: cursor,
 	}
-	st.cursor.line = len(lines) - 1
+	// Start where the pane's cursor is (tmux behavior), with the bottom of the
+	// buffer in view so the live screen maps onto the pane as the user left it.
 	st.top = st.maxTop()
-	st.clampCursor()
+	st.ensureVisible()
 	// Copy mode is exclusive: close any other local overlay first.
 	c.helpOpen = false
 	c.settingsOpen = false

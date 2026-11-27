@@ -365,21 +365,30 @@ func (p *pane) vtSnapshot() ([]copyLine, int, int) {
 	return out, cur.X, cur.Y
 }
 
-func (p *pane) visibleLines() []copyLine {
-	lines, _, _ := p.vtSnapshot()
+// copyBuffer returns scrollback plus the live screen, oldest line first.
+func (p *pane) copyBuffer() []copyLine {
+	lines, _ := p.copyBufferAtCursor()
 	return lines
 }
 
-// copyBuffer returns scrollback plus the live screen, oldest line first.
-func (p *pane) copyBuffer() []copyLine {
+// copyBufferAtCursor returns the copy buffer along with the pane's cursor
+// mapped into it. Copy mode starts on that point, so entering it lands on the
+// line the user was typing at instead of the bottom of the buffer.
+func (p *pane) copyBufferAtCursor() ([]copyLine, copyPoint) {
 	if p == nil {
-		return nil
+		return nil, copyPoint{}
 	}
 	lines := []copyLine{}
 	if p.sb != nil {
 		lines = append(lines, p.sb.History()...)
 	}
-	return append(lines, p.visibleLines()...)
+	history := len(lines)
+	visible, curX, curY := p.vtSnapshot()
+	lines = append(lines, visible...)
+	// The live screen sits at the bottom of the buffer, so the cursor's screen
+	// row maps onto the same row of the snapshot regardless of scrollback.
+	cursor := copyPoint{line: history + curY, col: curX}
+	return lines, cursor
 }
 
 // activePane returns the active pane of the active window, or nil.
