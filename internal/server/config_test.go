@@ -35,6 +35,9 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	if warning != nil {
 		t.Fatalf("missing config produced warning: %+v", *warning)
 	}
+	if got := copyKeySequence(&st); got != "\x19" {
+		t.Fatalf("default copy key = %q, want the Ctrl-Y sequence", got)
+	}
 	if st.cursorShape() != protocol.CursorShapeBlock || st.cursorBlink() {
 		t.Fatal("missing config did not use a steady block")
 	}
@@ -55,7 +58,7 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	st.setByID(settingCursorShape, 2)
 	st.setByID(settingCursorBlink, 0)
 	st.setByID(settingBorderColor, 1)
-	st.setByID(settingCopyKey, 2)
+	st.setByID(settingCopyKey, 1) // Ctrl-Shift-X, away from the Ctrl-Y default
 	if err := writeConfig(path, &st); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -63,8 +66,8 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	if warning != nil {
 		t.Fatalf("valid config produced warning: %+v", *warning)
 	}
-	if got := copyKeySequence(&loaded); got != "\x19" {
-		t.Fatalf("loaded copy key = %q, want Ctrl-Y sequence", got)
+	if got := copyKeySequence(&loaded); got != "\x1b[27;6;120~" {
+		t.Fatalf("loaded copy key = %q, want Ctrl-Shift-X sequence", got)
 	}
 	if loaded.cursorShape() != protocol.CursorShapeBar || !loaded.cursorBlink() {
 		t.Fatalf("loaded cursor = shape:%d blink:%v, want blinking bar", loaded.cursorShape(), loaded.cursorBlink())

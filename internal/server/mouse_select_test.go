@@ -159,9 +159,9 @@ func TestConfiguredCopyKeyCopiesAndClosesSelection(t *testing.T) {
 		bytes string
 		idx   int
 	}{
-		{"default ctrl-shift-c", "Ctrl-Shift-C", "\x1b[27;6;99~", 0},
+		{"default ctrl-y", "Ctrl-Y", "\x19", 0},
 		{"ctrl-shift-x", "Ctrl-Shift-X", "\x1b[27;6;120~", 1},
-		{"ctrl-y", "Ctrl-Y", "\x19", 2},
+		{"ctrl-shift-c", "Ctrl-Shift-C", "\x1b[27;6;99~", 2},
 		{"ctrl-insert", "Ctrl-Insert", "\x1b[2;5~", 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,7 +201,7 @@ func TestCopyKeyWithoutSelectionDoesNotCopy(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	writePaneText(t, s, 1, "clip me")
 
-	s.handleInput(c, []byte("\x1b[27;6;99~"))
+	s.handleInput(c, []byte("\x19"))
 	if _, ok := queuedClipboard(c); ok {
 		t.Fatal("copy key copied without a selection")
 	}
@@ -402,7 +402,7 @@ func TestCopyReturnsToTheLivePaneView(t *testing.T) {
 	writePaneText(t, s, 1, "\r\nAFTER")
 	s.broadcast()
 
-	s.handleInput(c, []byte("\x1b[27;6;99~"))
+	s.handleInput(c, []byte("\x19"))
 	if c.selection != nil {
 		t.Fatal("copy did not clear the selection")
 	}
@@ -501,7 +501,7 @@ func TestCopyKeyConsumesPendingPrefix(t *testing.T) {
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: 0, Y: 0}})
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectUpdate{X: 6, Y: 0}})
 
-	s.handleInput(c, []byte("\x1b[27;6;99~")) // Ctrl-Shift-C copy key
+	s.handleInput(c, []byte("\x19")) // Ctrl-Y copy key
 	if _, ok := queuedClipboard(c); !ok {
 		t.Fatal("copy key did not copy")
 	}

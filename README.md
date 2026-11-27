@@ -58,7 +58,7 @@ status bar), toggle back with `Ctrl-a` `z` again, open a new window with
 | **Navigation without a detour** | `Ctrl-a` `o` cycles panes, `Ctrl-a` `q` overlays large pane numbers for instant jumps, and `Ctrl-a` `Ctrl-a` sends a literal Ctrl-a to the application. |
 | **Mouse-ready, keyboard-complete** | Click to focus, double-click to zoom, click a status-bar tab to switch windows, or drag a divider to resize. Every core action also has a keyboard path. |
 | **Focus without losing the big picture** | Floating zoom lifts the active pane above the split layout, centered with at least a 2% margin. Toggle it again and the original layout returns. |
-| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback, or drag with the mouse to select a pane's text directly without leaving the live view; copy with `Ctrl-Shift-C` (configurable) to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
+| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback, or drag with the mouse to select a pane's text directly without leaving the live view; copy with `Ctrl-Y` (configurable) to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
 | **Terminal color that stays true** | Pane output preserves ANSI 16-color, 256-color, and 24-bit RGB styling, while active borders, window tabs, and help are color-coded for quick orientation. |
 | **Guidance, tuning, and a safety net** | Categorized help, a scrollable settings page, and an optional y/n confirmation before shutdown keep powerful actions discoverable and deliberate. |
 | **One view, multiple terminals** | Multiple clients can attach to the same session. Like tmux, the effective terminal size follows the smallest attached client. |
@@ -253,7 +253,7 @@ scrollback (2,000 lines per pane) plus its current screen. Movement is
 vim-style, and the overlay belongs only to the attached client that opened it —
 other clients keep using the pane as usual. Copy mode is modal: keys drive the
 view, and `Esc`, `q`, or `Ctrl-c` (with no selection) leave it. Copy the
-selection with the configured copy key (`Ctrl-Shift-C` by default; see
+selection with the configured copy key (`Ctrl-Y` by default; see
 [settings](#help-and-settings-right-where-you-work)), or with `y` or `Enter`;
 `Ctrl-c` copies while a `v`/`V`/`Ctrl-v` selection is active.
 
@@ -271,18 +271,21 @@ until you copy it or click elsewhere.
 | `Ctrl-u` / `Ctrl-d`, `Ctrl-b` / `Ctrl-f`, `PgUp` / `PgDn` | Half / full page |
 | `/` / `?`, `n` / `N` | Search forward / backward, repeat / reverse |
 | `v` / `V` / `Ctrl-v` | Character / line / rectangle selection |
-| `Ctrl-Shift-C` (configurable) | Copy the selection and leave copy mode |
+| `Ctrl-Y` (configurable) | Copy the selection and leave copy mode |
 | `y`, Enter, `Ctrl-c` with selection | Copy the selection and leave copy mode |
 | `q`, `Esc`, `Ctrl-c` with no selection | Leave copy mode without copying |
 
 The copy key is configured in the **Copy mode** settings section (or as
-`copy_key` under `[copy]` in `config.toml`) and accepts `Ctrl-Shift-C`
-(default), `Ctrl-Shift-X`, `Ctrl-Y`, or `Ctrl-Insert`. Note that many
-terminals grab `Ctrl-Shift-C`/`Ctrl-Insert` for their own clipboard and never
-forward them; if copies seem to do nothing, use `y`, `Enter`, or `Ctrl-c`
-with an active keyboard selection, or switch to `Ctrl-Y` — a mouse selection
-copies with the configured key only, since every other key belongs to the
-pane.
+`copy_key` under `[copy]` in `config.toml`) and accepts `Ctrl-Y` (default),
+`Ctrl-Shift-X`, `Ctrl-Shift-C`, or `Ctrl-Insert`. The default is a single
+control byte (`^Y`) that every terminal forwards untouched, whereas
+modified-letter chords are regularly claimed by the host terminal for its own
+clipboard — or collapsed to the unmodified key — long before qmm's pty sees
+them. If copies seem to do nothing, use `y`, `Enter`, or `Ctrl-c` with an
+active keyboard selection, or pick another key — a mouse selection copies with
+the configured key only, since every other key belongs to the pane. The
+[terminal copy-key investigation](docs/investigations/terminal-copy-keys-2026.md)
+has the details and the per-terminal workarounds.
 
 Motions accept a numeric prefix (`10j`, `3w`), and the view follows the
 cursor. `y` with no active selection copies the current line. Copied text goes
@@ -313,12 +316,18 @@ Drag across text in a pane to select it. The moment the pointer leaves the
 cell it started in, qmm draws a character-wise selection over a frozen
 snapshot of that pane, so the highlight stays put while output keeps arriving.
 The selection is not a mode: it never takes the keyboard and never blocks other
-actions. Press the configured copy key — `Ctrl-Shift-C` by default — to copy
+actions. Press the configured copy key — `Ctrl-Y` by default — to copy
 the selection to the host clipboard and qmm's paste buffer and return to the
 live pane, where `Ctrl-a` `]` pastes it. `y`, `Enter`, `Esc`, and `Ctrl-c` are
 ordinary keys here and go to the shell, just like everything else. Scrolling
 the wheel with a selection active extends it into (or back out of) the
 scrollback; wheel-down on the newest line ends it.
+
+Because qmm asks the terminal for mouse events, a plain drag belongs to qmm and
+the terminal makes no selection of its own. Most terminals let you hold
+`Shift` while dragging to override that: the terminal then selects and copies
+with its own chords, at the cost of covering only the visible screen (qmm runs
+on the alternate screen) and of qmm ignoring that gesture entirely.
 
 Any other input ends the selection and then does what it normally does: typing
 returns to the shell, clicking another pane focuses it, clicking a status-bar

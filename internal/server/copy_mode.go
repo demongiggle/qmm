@@ -782,10 +782,10 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 		s.closeCopyMode(c)
 		return
 	case seq == "\x03": // Ctrl-c
-		// Plain Ctrl-C reaches the server even when the terminal grabs
-		// Ctrl-Shift-C for its own clipboard. Copy when a selection is
-		// active (mouse drag, v/V/Ctrl-v); otherwise leave without
-		// copying so an empty copy mode still quits cleanly.
+		// Plain Ctrl-C reaches the server even when the terminal grabs the
+		// configured modified copy chord for its own clipboard. Copy when a
+		// selection is active (mouse drag, v/V/Ctrl-v); otherwise leave
+		// without copying so an empty copy mode still quits cleanly.
 		if st.selKind != selectionNone {
 			s.copySelection(c)
 			return

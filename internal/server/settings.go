@@ -50,7 +50,11 @@ var (
 	resizeStepNames  = []string{"1 cell", "2 cells", "4 cells"}
 	resizeStepValues = []int{1, 2, 4}
 
-	copyKeyNames = []string{"Ctrl-Shift-C", "Ctrl-Shift-X", "Ctrl-Y", "Ctrl-Insert"}
+	// Ctrl-Y is first, and therefore the default: it is a single control byte
+	// (0x19) that every terminal forwards untouched, unlike the modified-
+	// letter chords terminals commonly grab for their own clipboard. See
+	// docs/investigations/terminal-copy-keys-2026.md.
+	copyKeyNames = []string{"Ctrl-Y", "Ctrl-Shift-X", "Ctrl-Shift-C", "Ctrl-Insert"}
 )
 
 // settingDef is one adjustable row in the settings page. Default is an
@@ -606,20 +610,20 @@ func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, c
 
 // copyKeySequence maps the configured copy-selection key to the byte
 // sequence the client emits for it (see encodeKey in internal/client).
-// Unknown or nil settings fall back to the default, Ctrl-Shift-C.
+// Unknown or nil settings fall back to the default, Ctrl-Y.
 func copyKeySequence(st *settingsState) string {
 	def, ok := settingByID(settingCopyKey)
 	if !ok || st == nil {
-		return "\x1b[27;6;99~"
+		return "\x19"
 	}
 	switch st.text(def) {
 	case "Ctrl-Shift-X":
 		return "\x1b[27;6;120~"
-	case "Ctrl-Y":
-		return "\x19"
+	case "Ctrl-Shift-C":
+		return "\x1b[27;6;99~"
 	case "Ctrl-Insert":
 		return "\x1b[2;5~"
-	default: // Ctrl-Shift-C
-		return "\x1b[27;6;99~"
+	default: // Ctrl-Y
+		return "\x19"
 	}
 }
