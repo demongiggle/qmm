@@ -7,6 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
@@ -32,8 +33,7 @@ func newCopyModeFixture(cols, rows int, lines []copyLine) (*Server, *clientConn,
 		open:   true,
 		paneID: 1,
 		lines:  lines,
-		cols:   cols,
-		rows:   rows,
+		rect:   s.paneRects()[1],
 	}
 	st.cursor.line = len(lines) - 1
 	st.top = st.maxTop()
@@ -197,7 +197,7 @@ func TestCopyModeSearch(t *testing.T) {
 	}
 }
 
-func TestCopyModeOverlayIsPerClientAndHidesCursor(t *testing.T) {
+func TestCopyModeViewIsPerClientAndHidesCursor(t *testing.T) {
 	s, c, _ := newCopyModeFixture(80, 24, []copyLine{lineOf("hello copy mode")})
 	c2 := newHelpClient()
 	s.clients[c2] = struct{}{}
@@ -207,10 +207,10 @@ func TestCopyModeOverlayIsPerClientAndHidesCursor(t *testing.T) {
 	}
 	f := *c.frame
 	if f.CursorVisible {
-		t.Error("copy mode should hide the native pane cursor")
+		t.Error("copy mode should hide its pane's native cursor")
 	}
-	if len(f.Panes) != 0 || len(f.Splitters) != 0 || len(f.Tabs) != 0 {
-		t.Error("copy mode should hide pane hit targets and status tabs")
+	if len(f.Panes) != 2 || len(f.Splitters) != 1 || len(f.Tabs) == 0 {
+		t.Error("copy mode should keep the pane layout, borders and status tabs")
 	}
 	text := frameText(f)
 	if !strings.Contains(text, "hello copy mode") || !strings.Contains(text, "[copy mode]") {
@@ -218,6 +218,154 @@ func TestCopyModeOverlayIsPerClientAndHidesCursor(t *testing.T) {
 	}
 	if strings.Contains(frameText(*c2.frame), "[copy mode]") {
 		t.Error("copy mode overlay leaked to another client")
+	}
+}
+
+// rectText returns the characters inside r, one screen row per line.
+func rectText(f protocol.Frame, r layout.Rect) string {
+	var sb strings.Builder
+	for y := r.Y; y < r.Bottom(); y++ {
+		for x := r.X; x < r.Right(); x++ {
+			sb.WriteRune(cellAt(f, x, y).Ch)
+		}
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
+func TestCopyModeStaysInsideItsPane(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	rects := s.paneRects()
+	if len(rects) != 2 {
+		t.Fatalf("fixture has %d panes, want 2", len(rects))
+	}
+	_, _ = s.sess.panes[1].vt.Write([]byte("PANE-ONE"))
+	_, _ = s.sess.panes[2].vt.Write([]byte("PANE-TWO"))
+	s.openCopyMode(c, 0)
+	if c.copyMode == nil || !c.copyMode.open {
+		t.Fatal("prefix+[ did not open copy mode")
+	}
+	if got, want := c.copyMode.rect, rects[1]; got != want {
+		t.Fatalf("copy rect = %+v, want the active pane %+v", got, want)
+	}
+	// Show the top of the snapshot, where the pane's text sits.
+	copyKeys(s, c, "g", "g")
+
+	f := *c.frame
+	if len(f.Panes) != 2 {
+		t.Fatalf("frame has %d pane hit targets, want 2", len(f.Panes))
+	}
+	// The other pane keeps running and stays visible.
+	if got := rectText(f, rects[2]); !strings.Contains(got, "PANE-TWO") {
+		t.Fatalf("copy mode hid the other pane:\n%s", got)
+	}
+	// The copy view covers only its own pane, status row included.
+	paneText := rectText(f, rects[1])
+	if !strings.Contains(paneText, "PANE-ONE") || !strings.Contains(paneText, "[copy mode]") {
+		t.Fatalf("copy pane missing snapshot/hint:\n%s", paneText)
+	}
+	statusY := rects[1].Bottom() - 1
+	if got := cellAt(f, rects[1].Right()-1, statusY).BG; got != colCopyStatusBG {
+		t.Fatalf("copy status row background = %d, want %d", got, colCopyStatusBG)
+	}
+	if got := cellAt(f, rects[1].Right(), statusY).BG; got == colCopyStatusBG {
+		t.Fatal("copy status row painted over the pane border")
+	}
+	if got := cellAt(f, rects[2].X, statusY).BG; got == colCopyStatusBG {
+		t.Fatal("copy status row painted over the other pane")
+	}
+	if got := rectText(f, rects[2]); strings.Contains(got, "copy mode") {
+		t.Fatalf("copy status leaked into the other pane:\n%s", got)
+	}
+	// The session status bar is still there, with its window tab.
+	bar := rectText(f, layout.Rect{Y: 23, W: 80, H: 1})
+	if !strings.Contains(bar, "0:zsh*") {
+		t.Fatalf("copy mode hid the status bar:\n%s", bar)
+	}
+}
+
+func TestCopyModeFollowsPaneRect(t *testing.T) {
+	s, _, st := newCopyModeFixture(80, 24, linesOf(60, "line %02d"))
+	if st.rect != s.paneRects()[1] {
+		t.Fatalf("fixture rect = %+v, want the pane rect", st.rect)
+	}
+
+	// A resize moves the pane; the viewport follows instead of keeping the
+	// old screen-sized rect.
+	s.cols, s.rows = 60, 20
+	s.relayout()
+	s.broadcast()
+	if want := s.paneRects()[1]; st.rect != want {
+		t.Fatalf("rect after resize = %+v, want %+v", st.rect, want)
+	}
+	if st.top > st.maxTop() {
+		t.Fatalf("top = %d is past maxTop %d after resize", st.top, st.maxTop())
+	}
+
+	// Zooming the window shows only the active pane; a copy view on a pane
+	// that left the layout closes rather than drawing over the wrong cells.
+	s2, c2, st2 := newCopyModeFixture(80, 24, linesOf(60, "line %02d"))
+	st2.paneID = 2
+	st2.rect = s2.paneRects()[2]
+	s2.toggleZoom()
+	if c2.copyMode != nil && c2.copyMode.open {
+		t.Fatalf("copy mode on a hidden pane stayed open: %+v", c2.copyMode)
+	}
+}
+
+func TestCopyModeMouseMapsWithinPane(t *testing.T) {
+	s, c, st := newCopyModeFixture(80, 24, linesOf(60, "line %02d"))
+	st.rect = layout.Rect{X: 10, Y: 5, W: 20, H: 11}
+	st.top = 30
+	st.cursor = copyPoint{line: 30}
+
+	p := st.scrToBuffer(12, 7)
+	if want := (copyPoint{line: 32, col: 2}); p != want {
+		t.Fatalf("scrToBuffer(12,7) = %+v, want %+v", p, want)
+	}
+	// Points outside the pane clamp to its edges, so a drag can leave it.
+	p = st.scrToBuffer(0, 0)
+	if want := (copyPoint{line: 30, col: 0}); p != want {
+		t.Fatalf("scrToBuffer(0,0) = %+v, want %+v", p, want)
+	}
+	p = st.scrToBuffer(79, 23)
+	if p.line != 30+st.viewRows()-1 {
+		t.Fatalf("scrToBuffer(79,23) line = %d, want the pane's last view row", p.line)
+	}
+
+	// A drag started inside the copy view anchors copy mode's selection.
+	s.handleSelectStart(c, 12, 7)
+	if c.selection != nil {
+		t.Fatal("a drag inside copy mode must not open a mouse selection")
+	}
+	if !st.mouseDrag || st.anchor != (copyPoint{line: 32, col: 2}) {
+		t.Fatalf("copy-mode anchor = %+v drag=%v, want the pressed cell", st.anchor, st.mouseDrag)
+	}
+}
+
+func TestCopyModeClickOutsideReturnsToLayout(t *testing.T) {
+	s, c, _ := newCopyModeFixture(80, 24, []copyLine{lineOf("hello copy mode")})
+	rects := s.paneRects()
+	other := rects[2]
+
+	// Pressing another pane closes copy mode and focuses that pane.
+	x, y := other.X+2, other.Y+1
+	if s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionFocus{X: x, Y: y}}) {
+		t.Fatal("unexpected shutdown request")
+	}
+	if c.copyMode != nil {
+		t.Fatal("pressing another pane should leave copy mode")
+	}
+	if got := s.sess.activeWindow().activePane; got != 2 {
+		t.Fatalf("active pane = %d, want 2", got)
+	}
+
+	// The drag that follows becomes an ordinary mouse selection.
+	if s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: x, Y: y}}) {
+		t.Fatal("unexpected shutdown request")
+	}
+	if c.selection == nil || c.selection.paneID != 2 {
+		t.Fatalf("selection = %+v, want one on pane 2", c.selection)
 	}
 }
 

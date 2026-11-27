@@ -41,14 +41,26 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
-	// Copy mode is a full-screen modal: input, resize, wheel and lifecycle
-	// messages reach it, but other pane actions are swallowed. Mouse
-	// selection gestures are allowed so a drag that started before the
-	// overlay opened can keep extending the selection.
-	if c.copyMode != nil && c.copyMode.open {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane, protocol.ActionWheel,
-			protocol.ActionSelectStart, protocol.ActionSelectUpdate:
+	// Copy mode owns one pane, not the whole screen: keyboard input and wheel
+	// steps drive it, and a drag inside (or past) its pane extends its
+	// selection. Other pane actions are swallowed, but mouse gestures outside
+	// the pane leave copy mode first so clicks, tab switches, splitter drags
+	// and double-click zoom keep working on the layout that stays visible.
+	if st := c.copyMode; st != nil && st.open {
+		switch msg := in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane,
+			protocol.ActionWheel, protocol.ActionSelectUpdate:
+			// Reaches copy mode below.
+		case protocol.ActionSelectStart:
+			if !st.covers(msg.X, msg.Y) {
+				s.closeCopyMode(c)
+			}
+		case protocol.ActionFocus:
+			if !st.covers(msg.X, msg.Y) {
+				s.closeCopyMode(c)
+			}
+		case protocol.ActionSelectWindow, protocol.ActionDragStart, protocol.ActionTogglePaneZoom:
+			s.closeCopyMode(c)
 		default:
 			return false
 		}
@@ -109,7 +121,6 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		if s.recomputeSize() {
 			s.relayout()
 			s.needFull = true
-			s.resizeCopyModes()
 			// Snapshotted selections no longer match the layout.
 			s.dropSelections()
 		}
@@ -191,7 +202,6 @@ func (s *Server) detachClient(c *clientConn, reason string) {
 	if s.recomputeSize() {
 		s.relayout()
 		s.needFull = true
-		s.resizeCopyModes()
 	}
 	s.broadcast()
 }
@@ -206,7 +216,6 @@ func (s *Server) dropClient(c *clientConn) {
 	if s.recomputeSize() {
 		s.relayout()
 		s.needFull = true
-		s.resizeCopyModes()
 	}
 	s.broadcast()
 }

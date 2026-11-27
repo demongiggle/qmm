@@ -8,6 +8,7 @@ import (
 
 	"github.com/rivo/uniseg"
 
+	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
@@ -47,13 +48,15 @@ type copyPoint struct {
 type copyModeState struct {
 	open   bool
 	paneID int
+	// rect is the pane's screen viewport. Copy mode draws inside it and leaves
+	// the rest of the layout (other panes, borders, status bar) live, so it
+	// follows the layout while it stays open on the same pane.
+	rect layout.Rect
 	// mouseDrag is true once a drag inside the copy view has re-anchored the
 	// selection, so select-update messages extend it instead of moving the
 	// keyboard cursor.
 	mouseDrag bool
 	lines     []copyLine
-	cols      int // host screen size, used for the overlay viewport
-	rows      int
 
 	top    int // first buffer line shown
 	cursor copyPoint
@@ -72,10 +75,15 @@ type copyModeState struct {
 }
 
 func (st *copyModeState) viewRows() int {
-	if st.rows < 2 {
+	if st.rect.H < 2 {
 		return 1
 	}
-	return st.rows - 1
+	return st.rect.H - 1
+}
+
+// covers reports whether the copy view is drawn at (x, y).
+func (st *copyModeState) covers(x, y int) bool {
+	return st.rect.Contains(x, y)
 }
 
 func (st *copyModeState) maxTop() int {
@@ -459,16 +467,19 @@ func (s *Server) openCopyMode(c *clientConn, scrollUp int) {
 	if p == nil {
 		return
 	}
+	rect, ok := s.paneRects()[p.id]
+	if !ok || rect.W < 1 || rect.H < 1 {
+		return
+	}
 	lines := p.copyBuffer()
 	if len(lines) == 0 {
-		lines = []copyLine{blankCopyLine(s.cols)}
+		lines = []copyLine{blankCopyLine(rect.W)}
 	}
 	st := &copyModeState{
 		open:   true,
 		paneID: p.id,
 		lines:  lines,
-		cols:   s.cols,
-		rows:   s.rows,
+		rect:   rect,
 	}
 	st.cursor.line = len(lines) - 1
 	st.top = st.maxTop()
@@ -498,12 +509,14 @@ func (s *Server) closeCopyMode(c *clientConn) {
 	s.broadcast()
 }
 
-// scrToBuffer maps screen cell coordinates to a position in the copy-mode
-// buffer. The copy view draws viewRows lines starting at st.top; the status
-// row maps to the last visible line. Columns are clamped to the line length.
+// scrToBuffer maps screen cell coordinates onto the copy-mode buffer. The copy
+// view draws viewRows lines inside the pane rect, and the pane's last row is
+// the status row. Columns are clamped to the line length; points outside the
+// pane clamp to its edges so a drag that leaves the pane keeps extending the
+// selection.
 func (st *copyModeState) scrToBuffer(x, y int) copyPoint {
 	viewRows := st.viewRows()
-	row := clampInt(y, 0, viewRows-1)
+	row := clampInt(y-st.rect.Y, 0, viewRows-1)
 	line := st.top + row
 	if len(st.lines) == 0 {
 		line = 0
@@ -514,18 +527,40 @@ func (st *copyModeState) scrToBuffer(x, y int) copyPoint {
 	if maxCol < 0 {
 		maxCol = 0
 	}
-	return copyPoint{line: line, col: clampInt(x, 0, maxCol)}
+	return copyPoint{line: line, col: clampInt(x-st.rect.X, 0, maxCol)}
 }
 
-func (s *Server) resizeCopyModes() {
+// syncCopyModes keeps every client's copy view pinned to the pane it was
+// opened on. It runs at the start of broadcast, so a layout change is reflected
+// before the frame is composed: the view follows its pane, and a pane that left
+// the active window (window switch, pane exit, zoom of another pane) closes the
+// view instead of leaving it drawn over the wrong cells.
+func (s *Server) syncCopyModes() {
+	if s.sess == nil {
+		return
+	}
+	var rects map[int]layout.Rect
 	for c := range s.clients {
 		st := c.copyMode
 		if st == nil || !st.open {
 			continue
 		}
-		st.cols, st.rows = s.cols, s.rows
-		st.ensureVisible()
-		c.forceFull = true
+		if rects == nil {
+			rects = s.paneRects()
+		}
+		r, ok := rects[st.paneID]
+		if !ok || r.W < 1 || r.H < 1 || s.sess.panes[st.paneID] == nil {
+			st.open = false
+			c.copyMode = nil
+			c.clearRepeat()
+			c.forceFull = true
+			continue
+		}
+		if r != st.rect {
+			st.rect = r
+			st.ensureVisible()
+			c.forceFull = true
+		}
 	}
 }
 
@@ -834,24 +869,28 @@ func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl f
 	}
 }
 
-func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, cols, rows int, st *copyModeState) {
-	frame.Panes = nil
-	frame.Splitters = nil
-	frame.Tabs = nil
-	frame.CursorVisible = false
-	frame.CursorX, frame.CursorY = 0, 0
+// copyModeCovers reports whether this client's open copy view replaces the
+// given pane's cells, so the pane's live caret must stay hidden.
+func (c *compositor) copyModeCovers(paneID int) bool {
+	return c.copyMode != nil && c.copyMode.open && c.copyMode.paneID == paneID
+}
 
-	viewRows := rows - 1
-	if viewRows < 1 {
-		viewRows = 1
+// drawCopyMode paints the copy view into its pane's rect. Everything outside
+// the rect (other panes, borders, the status bar) stays as composed, so the
+// session layout remains visible while one pane shows its scrollback.
+func (c *compositor) drawCopyMode(setCell helpSetCell, st *copyModeState) {
+	r := st.rect
+	if r.W < 1 || r.H < 1 {
+		return
 	}
-	for y := 0; y < viewRows && y < rows; y++ {
+	viewRows := st.viewRows()
+	for y := 0; y < viewRows && y < r.H; y++ {
 		idx := st.top + y
 		line := copyLine{}
 		if idx >= 0 && idx < len(st.lines) {
 			line = st.lines[idx]
 		}
-		blitSnapshotLine(setCell, line, 0, y, cols, func(col int) (int32, int32, uint8, bool) {
+		blitSnapshotLine(setCell, line, r.X, r.Y+y, r.W, func(col int) (int32, int32, uint8, bool) {
 			if st.inSelection(idx, col) {
 				return colCopySelectionFG, colCopySelectionBG, 0, true
 			}
@@ -862,12 +901,14 @@ func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, co
 		})
 	}
 
-	statusY := rows - 1
-	if statusY < 0 {
+	// The status line takes the pane's bottom row; a one-row pane has no room
+	// for it, so the view keeps the whole rect.
+	if r.H < 2 {
 		return
 	}
-	for x := 0; x < cols; x++ {
-		setCell(x, statusY, ' ', colCopyStatusFG, colCopyStatusBG, 0)
+	statusY := r.Bottom() - 1
+	for x := 0; x < r.W; x++ {
+		setCell(r.X+x, statusY, ' ', colCopyStatusFG, colCopyStatusBG, 0)
 	}
 	var label string
 	switch {
@@ -887,14 +928,14 @@ func (c *compositor) drawCopyMode(frame *protocol.Frame, setCell helpSetCell, co
 		label = fmt.Sprintf(" [copy mode]  line %d/%d  col %d", st.cursor.line+1, len(st.lines), st.cursor.col+1)
 	}
 	hint := "  q quit  y copy  v select  / search"
-	if len([]rune(label))+len([]rune(hint)) > cols {
+	if len([]rune(label))+len([]rune(hint)) > r.W {
 		hint = ""
 	}
 	runes := []rune(label + hint)
 	for i, ch := range runes {
-		if i >= cols {
+		if i >= r.W {
 			break
 		}
-		setCell(i, statusY, ch, colCopyStatusKey, colCopyStatusBG, 0)
+		setCell(r.X+i, statusY, ch, colCopyStatusKey, colCopyStatusBG, 0)
 	}
 }

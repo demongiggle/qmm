@@ -113,7 +113,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	}
 	render := func() protocol.Frame {
 		if c.copyMode != nil && c.copyMode.open {
-			c.drawCopyMode(&frame, setCell, cols, rows, c.copyMode)
+			c.drawCopyMode(setCell, c.copyMode)
 		} else if c.configWarningOpen {
 			c.drawConfigWarning(&frame, setCell, cols, rows, c.configWarning)
 		} else if c.confirmOpen {
@@ -184,8 +184,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			if id == w.activePane && !w.zoomed {
 				cur := p.vtCursor()
 				frame.CursorX, frame.CursorY = r.X+cur.x, r.Y+cur.y
-				// A frozen snapshot has no live caret.
-				frame.CursorVisible = cur.visible && !selected
+				// A frozen snapshot has no live caret, and a copy view
+				// replaces the pane's cells with scrollback.
+				frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(id)
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
 				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
@@ -259,8 +260,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 					}
 					cur := p.vtCursor()
 					frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
-					// A frozen snapshot has no live caret.
-					frame.CursorVisible = cur.visible && !selected
+					// A frozen snapshot has no live caret, and a copy view
+					// replaces the pane's cells with scrollback.
+					frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(w.activePane)
 				} else {
 					frame.CursorVisible = false
 				}

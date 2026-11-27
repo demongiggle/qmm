@@ -26,8 +26,8 @@ working copy/paste, which is what made this look like a qmm regression.
 `copyKeySequence()` maps the single `copy_key` setting to one escape sequence,
 and both selection paths compare the whole keystroke against it:
 
-- `internal/server/actions.go:490` — pending mouse selection
-- `internal/server/copy_mode.go:668` — copy mode
+- `internal/server/actions.go:499` — pending mouse selection
+- `internal/server/copy_mode.go:703` — copy mode
 - `internal/server/settings.go:614` — the mapping
 
 | Setting | Bytes on the wire |

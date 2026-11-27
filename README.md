@@ -58,7 +58,7 @@ status bar), toggle back with `Ctrl-a` `z` again, open a new window with
 | **Navigation without a detour** | `Ctrl-a` `o` cycles panes, `Ctrl-a` `q` overlays large pane numbers for instant jumps, and `Ctrl-a` `Ctrl-a` sends a literal Ctrl-a to the application. |
 | **Mouse-ready, keyboard-complete** | Click to focus, double-click to zoom, click a status-bar tab to switch windows, or drag a divider to resize. Every core action also has a keyboard path. |
 | **Focus without losing the big picture** | Floating zoom lifts the active pane above the split layout, centered with at least a 2% margin. Toggle it again and the original layout returns. |
-| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode over each pane's scrollback, or drag with the mouse to select a pane's text directly without leaving the live view; copy with `Ctrl-Y` (configurable) to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
+| **History you can search and copy** | `Ctrl-a` `[` opens a vim-keyed copy mode inside the active pane's scrollback while the rest of the layout stays visible, or drag with the mouse to select a pane's text directly without leaving the live view; copy with `Ctrl-Y` (configurable) to the host clipboard and qmm's paste buffer, then paste with `Ctrl-a` `]`. |
 | **Terminal color that stays true** | Pane output preserves ANSI 16-color, 256-color, and 24-bit RGB styling, while active borders, window tabs, and help are color-coded for quick orientation. |
 | **Guidance, tuning, and a safety net** | Categorized help, a scrollable settings page, and an optional y/n confirmation before shutdown keep powerful actions discoverable and deliberate. |
 | **One view, multiple terminals** | Multiple clients can attach to the same session. Like tmux, the effective terminal size follows the smallest attached client. |
@@ -248,14 +248,19 @@ client.
 
 ### Scrollback and vim-style copy mode
 
-`Ctrl-a` `[` opens copy mode, a full-screen view of the active pane's
-scrollback (2,000 lines per pane) plus its current screen. Movement is
-vim-style, and the overlay belongs only to the attached client that opened it —
-other clients keep using the pane as usual. Copy mode is modal: keys drive the
-view, and `Esc`, `q`, or `Ctrl-c` (with no selection) leave it. Copy the
+`Ctrl-a` `[` opens copy mode inside the active pane: a view of that pane's
+scrollback (2,000 lines per pane) plus its current screen, drawn in the pane's
+own rectangle. The other panes, dividers and status bar stay visible and live,
+and the view follows the pane when the layout changes. Movement is vim-style,
+and the view belongs only to the attached client that opened it — other clients
+keep using the pane as usual. Copy mode is modal for the keyboard: keys drive
+the view, and `Esc`, `q`, or `Ctrl-c` (with no selection) leave it. Copy the
 selection with the configured copy key (`Ctrl-Y` by default; see
 [settings](#help-and-settings-right-where-you-work)), or with `y` or `Enter`;
-`Ctrl-c` copies while a `v`/`V`/`Ctrl-v` selection is active.
+`Ctrl-c` copies while a `v`/`V`/`Ctrl-v` selection is active. A drag that leaves
+the pane still extends the selection, clamped to the pane's edges; clicking
+another pane, a status-bar tab, or a divider leaves copy mode and performs that
+click.
 
 Dragging over text with the mouse selects it without entering copy mode; see
 [Mouse shortcuts](#mouse-shortcuts). The selection highlight stays visible
@@ -310,7 +315,8 @@ border between panes to resize live. Scrolling the wheel enters copy mode and
 moves through the active pane's scrollback; see
 [Scrollback and vim-style copy mode](#scrollback-and-vim-style-copy-mode).
 If help, settings, or pane numbers are open, a wheel event dismisses that
-overlay instead.
+overlay instead. While copy mode is open, a press outside its pane leaves copy
+mode and then focuses, selects, drags, or switches windows as usual.
 
 Drag across text in a pane to select it. The moment the pointer leaves the
 cell it started in, qmm draws a character-wise selection over a frozen

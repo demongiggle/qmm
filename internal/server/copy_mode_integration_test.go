@@ -211,3 +211,95 @@ func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
 		return strings.Contains(text, "AFTER-MOUSE-SELECT")
 	})
 }
+
+// TestCopyModeStaysInsideItsPaneIntegration drives a real two-pane session:
+// opening copy mode in one pane must not hide the other pane or the status
+// bar, which is what a full-screen overlay would do.
+func TestCopyModeStaysInsideItsPaneIntegration(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	t.Cleanup(func() {
+		conn, err := net.DialTimeout("unix", sock, time.Second)
+		if err != nil {
+			return
+		}
+		_ = protocol.NewCodec(conn).Send(protocol.Shutdown{})
+		_ = conn.Close()
+	})
+
+	go func() { _ = Run(cfg) }()
+	waitSocket(t, sock)
+	c := dial(t, sock, 80, 24)
+	defer c.conn.Close()
+	if _, ok := c.recv().(protocol.Welcome); !ok {
+		t.Fatal("expected Welcome")
+	}
+
+	// Marker in the left pane, then split so a second pane takes the focus.
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo LEFT-MARK\n")}); err != nil {
+		t.Fatalf("echo left: %v", err)
+	}
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "LEFT-MARK")
+	})
+	if err := c.codec.Send(protocol.ActionSplit{Vertical: true}); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Panes) == 2
+	})
+	if err := c.codec.Send(protocol.Input{Data: []byte("echo RIGHT-MARK\n")}); err != nil {
+		t.Fatalf("echo right: %v", err)
+	}
+	c.waitForScreen(func(text string) bool {
+		return strings.Contains(text, "RIGHT-MARK")
+	})
+
+	// Entering copy mode forces a full frame, so one frame shows the whole
+	// screen: the copy view in the focused pane plus the untouched layout.
+	if err := c.codec.Send(protocol.Input{Data: []byte{0x01, '['}}); err != nil {
+		t.Fatalf("prefix [: %v", err)
+	}
+	f := c.waitForFrame(func(f protocol.Frame) bool {
+		return f.Full && strings.Contains(frameText(f), "[copy mode]")
+	})
+	text := frameText(f)
+	if !strings.Contains(text, "LEFT-MARK") {
+		t.Fatalf("copy mode hid the other pane:\n%s", text)
+	}
+	var active protocol.PaneRect
+	for _, p := range f.Panes {
+		if p.Active {
+			active = p
+		}
+	}
+	if active.W == 0 || active.W >= f.Cols {
+		t.Fatalf("active pane rect = %+v, want one split pane", active)
+	}
+	if len(f.Tabs) == 0 {
+		t.Fatalf("copy mode hid the status bar tabs:\n%s", text)
+	}
+	// The copy status line sits on the focused pane's bottom row, to the
+	// right of the divider -- never across the whole terminal.
+	rowText := func(x0, x1, y int) string {
+		var sb strings.Builder
+		for x := x0; x < x1; x++ {
+			sb.WriteRune(cellAt(f, x, y).Ch)
+		}
+		return sb.String()
+	}
+	statusY := active.Y + active.H - 1
+	if got := rowText(active.X, active.X+active.W, statusY); !strings.Contains(got, "[copy mode]") {
+		t.Fatalf("copy status missing from the focused pane row %d: %q", statusY, got)
+	}
+	if got := rowText(0, active.X, statusY); strings.Contains(got, "[copy mode]") {
+		t.Fatalf("copy status painted left of the focused pane: %q", got)
+	}
+	if got := rowText(0, f.Cols, f.Rows-1); strings.Contains(got, "[copy mode]") {
+		t.Fatalf("copy status replaced the session status bar: %q", got)
+	}
+}

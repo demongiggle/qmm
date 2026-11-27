@@ -454,6 +454,9 @@ func (s *Server) scheduleRender() {
 func (s *Server) broadcast() {
 	forceFull := s.needFull
 	s.needFull = false
+	// A copy view is pinned to the pane it was opened on; a layout change
+	// moves it with that pane or closes it when the pane is gone.
+	s.syncCopyModes()
 	// A selection pins the pane viewport it was started on. If the layout
 	// moved the pane (split, zoom, window switch, pane exit), the snapshot is
 	// stale: drop it rather than draw it over the wrong rectangle.
