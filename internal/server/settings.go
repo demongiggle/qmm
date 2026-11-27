@@ -44,8 +44,17 @@ type statusBarStyle struct {
 var (
 	onOffValues = []string{"On", "Off"}
 
-	borderColorNames = []string{"Green", "Cyan", "Yellow", "Magenta"}
-	borderColorCodes = []int32{46, 39, 226, 201}
+	// accentColorNames and accentColorCodes color everything that marks the
+	// active pane: the border around it and its tab in the session status bar.
+	// Every entry is a bright shade so the dark bold tab label stays readable
+	// when the accent becomes a background. The first four names are the
+	// palette's original choices, and configs saved by older builds may still
+	// refer to them.
+	accentColorNames = []string{
+		"Green", "Cyan", "Yellow", "Magenta", "Blue", "Lime",
+		"Amber", "Orange", "Red", "Pink", "Purple", "White",
+	}
+	accentColorCodes = []int32{46, 39, 226, 201, 33, 118, 214, 208, 196, 213, 141, 231}
 
 	// statusBarNames and statusBarColors are shared by the session status bar
 	// and the copy-mode status line, so both can be tuned from one palette.
@@ -110,7 +119,7 @@ var settingsSections = []settingsSection{
 		Options: []settingDef{
 			{ID: settingStatusClock, Label: "Status bar clock", Values: onOffValues, Default: 0},
 			{ID: settingStatusBarColor, Label: "Status bar color", Values: statusBarNames, Default: 0},
-			{ID: settingBorderColor, Label: "Active pane border", Values: borderColorNames, Default: 0},
+			{ID: settingBorderColor, Label: "Active pane border", Values: accentColorNames, Default: 0},
 			{ID: settingCursorShape, Label: "Cursor shape", Values: cursorShapeNames, Default: 0},
 			{ID: settingCursorBlink, Label: "Cursor blink", Values: onOffValues, Default: 1},
 		},
@@ -259,16 +268,18 @@ func (st *settingsState) showClock() bool {
 	return st.boolSetting(settingStatusClock, true)
 }
 
+// borderColor is the accent that marks the active pane: its border, and its
+// tab in the session status bar.
 func (st *settingsState) borderColor() int32 {
 	def, ok := settingByID(settingBorderColor)
 	if !ok {
 		return int32(colBorderActive)
 	}
 	idx := st.index(def)
-	if idx < 0 || idx >= len(borderColorCodes) {
+	if idx < 0 || idx >= len(accentColorCodes) {
 		return int32(colBorderActive)
 	}
-	return borderColorCodes[idx]
+	return accentColorCodes[idx]
 }
 
 func (st *settingsState) cursorShape() uint8 {
@@ -350,6 +361,28 @@ func (st *settingsState) statusBarStyle() statusBarStyle {
 // copyStatusStyle colors the copy-mode status line that covers the session bar.
 func (st *settingsState) copyStatusStyle() statusBarStyle {
 	return st.statusBarStyleAt(settingCopyStatusColor, 1)
+}
+
+// settingPreviewStyle returns the colors that preview one color-setting value
+// on its settings row: the bar text/background pair for the two status lines,
+// and the dark-on-accent pair the active tab uses. ok is false for options that
+// do not pick a color.
+func settingPreviewStyle(def settingDef, idx int) (fg, bg int32, ok bool) {
+	switch def.ID {
+	case settingStatusBarColor, settingCopyStatusColor:
+		if idx < 0 || idx >= len(statusBarColors) {
+			return 0, 0, false
+		}
+		style := statusBarColors[idx]
+		return style.fg, style.bg, true
+	case settingBorderColor:
+		if idx < 0 || idx >= len(accentColorCodes) {
+			return 0, 0, false
+		}
+		return colBarActiveFG, accentColorCodes[idx], true
+	default:
+		return 0, 0, false
+	}
 }
 
 func settingsOptionCount() int {
@@ -656,8 +689,13 @@ func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, c
 	putHelpText(setCell, x+1, y, labelWidth, fitHelpText(prefix+line.def.Label, labelWidth), fg, bg, style)
 
 	valueX := x + width - valueWidth - 1
+	// Color options paint the value chip with the palette they select, so the
+	// row previews the bar or accent before it is applied. Other options
+	// highlight their chip while selected.
 	vfg, vbg := int32(colHelpKeyFG), int32(colHelpKeyBG)
-	if selected {
+	if pfg, pbg, ok := settingPreviewStyle(line.def, opts.index(line.def)); ok {
+		vfg, vbg = pfg, pbg
+	} else if selected {
 		vfg, vbg = int32(colBarActiveFG), opts.borderColor()
 	}
 	for i := 0; i < valueWidth; i++ {

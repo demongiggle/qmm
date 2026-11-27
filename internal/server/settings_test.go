@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -409,4 +410,161 @@ func TestStatusBarPaletteIsRichAndConsistent(t *testing.T) {
 			t.Errorf("legacy palette name %q disappeared", name)
 		}
 	}
+}
+
+// TestAccentPaletteIsRichAndConsistent guards the palette shared by the active
+// pane border and the active status-bar tab: the tab draws its dark bold label
+// straight onto the accent, so every choice must stay bright enough to read.
+func TestAccentPaletteIsRichAndConsistent(t *testing.T) {
+	if len(accentColorNames) != len(accentColorCodes) {
+		t.Fatalf("accent names = %d, codes = %d", len(accentColorNames), len(accentColorCodes))
+	}
+	if len(accentColorNames) < 10 {
+		t.Fatalf("accent palette has %d choices, want at least 10", len(accentColorNames))
+	}
+	names := map[string]bool{}
+	codes := map[int32]bool{}
+	for i, name := range accentColorNames {
+		if names[name] {
+			t.Errorf("duplicate accent name %q", name)
+		}
+		names[name] = true
+		code := accentColorCodes[i]
+		if codes[code] {
+			t.Errorf("duplicate accent color %d", code)
+		}
+		codes[code] = true
+		if got := xtermLuminance(code); got < 0.15 {
+			t.Errorf("%s accent %d is too dark for the dark tab label (luminance %.2f)", name, code, got)
+		}
+	}
+	// Configs written by older builds name these values; keep them valid.
+	for _, name := range []string{"Green", "Cyan", "Yellow", "Magenta"} {
+		if !names[name] {
+			t.Errorf("legacy accent name %q disappeared", name)
+		}
+	}
+	// The active tab pairs the accent with a dark label.
+	if colBarActiveFG > 16 {
+		t.Errorf("active tab label color %d is not dark; the accent palette assumes it", colBarActiveFG)
+	}
+}
+
+// xtermLuminance approximates the relative luminance of a 6x6x6-cube xterm-256
+// color, which is enough to reject accents that would swallow the tab label.
+func xtermLuminance(idx int32) float64 {
+	if idx < 16 || idx > 231 {
+		return 1
+	}
+	n := int(idx) - 16
+	levels := []int{n / 36, (n / 6) % 6, n % 6}
+	lum := 0.0
+	weights := []float64{0.2126, 0.7152, 0.0722}
+	for i, level := range levels {
+		channel := 0.0
+		if level > 0 {
+			channel = float64(55+level*40) / 255
+			channel = math.Pow((channel+0.055)/1.055, 2.4)
+		}
+		lum += weights[i] * channel
+	}
+	return lum
+}
+
+func settingsRowY(t *testing.T, f protocol.Frame, label string) int {
+	t.Helper()
+	for y := 0; y < f.Rows; y++ {
+		var row strings.Builder
+		for x := 0; x < f.Cols; x++ {
+			row.WriteRune(cellAt(f, x, y).Ch)
+		}
+		if strings.Contains(row.String(), label) {
+			return y
+		}
+	}
+	t.Fatalf("settings frame is missing the %q row", label)
+	return 0
+}
+
+// checkValueChip asserts the value chip on one settings row is painted with fg
+// and bg, which is how color options preview their palette.
+func checkValueChip(t *testing.T, f protocol.Frame, y int, value string, fg, bg int32) {
+	t.Helper()
+	chip := "[" + value + "]"
+	runes := []rune(chip)
+	for x := 0; x+len(runes) <= f.Cols; x++ {
+		match := true
+		for i, r := range runes {
+			if cellAt(f, x+i, y).Ch != r {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		cell := cellAt(f, x, y)
+		if cell.FG != fg || cell.BG != bg {
+			t.Fatalf("%s chip colors = %d/%d, want %d/%d", chip, cell.FG, cell.BG, fg, bg)
+		}
+		if cell.Style&protocol.StyleBold == 0 {
+			t.Errorf("%s chip is not bold", chip)
+		}
+		return
+	}
+	t.Fatalf("row %d has no %s chip", y, chip)
+}
+
+// TestSettingsColorRowsPreviewTheirPalette keeps the settings page honest: the
+// status bar, status line, and active accent options must show the colors they
+// select instead of a generic highlight.
+func TestSettingsColorRowsPreviewTheirPalette(t *testing.T) {
+	s, c := newHelpServer(80, 26)
+	opts := s.sess.opts()
+	navy := statusColorIndex(t, "Navy")
+	olive := statusColorIndex(t, "Olive")
+	pink := accentColorIndex(t, "Pink")
+	opts.setByID(settingStatusBarColor, navy)
+	opts.setByID(settingCopyStatusColor, olive)
+	opts.setByID(settingBorderColor, pink)
+	fireBinding(s, c, "s")
+	// The page holds 20 rows, so scroll to the end to keep the copy-mode color
+	// row visible alongside the appearance ones.
+	s.handleInput(c, []byte("G"))
+	f := *c.frame
+
+	bar := statusBarColors[navy]
+	checkValueChip(t, f, settingsRowY(t, f, "Status bar color"), "Navy", bar.fg, bar.bg)
+	line := statusBarColors[olive]
+	checkValueChip(t, f, settingsRowY(t, f, "Status line color"), "Olive", line.fg, line.bg)
+	// The accent previews the active tab: a dark label on the accent color.
+	checkValueChip(t, f, settingsRowY(t, f, "Active pane border"), "Pink", colBarActiveFG, accentColorCodes[pink])
+
+	// Cycling the value updates the preview on the selected row.
+	opts.setByID(settingBorderColor, 0)    // Green
+	opts.setByID(settingStatusBarColor, 0) // back to Slate
+	s.handleInput(c, []byte("\x1b[H"))     // Home: the clock is selected
+	s.handleInput(c, []byte("\x1b[B"))     // Status bar color
+	s.handleInput(c, []byte("\x1b[C"))     // Slate -> Blue
+	f = *c.frame
+	blue := statusBarColors[1]
+	checkValueChip(t, f, settingsRowY(t, f, "Status bar color"), "Blue", blue.fg, blue.bg)
+	checkValueChip(t, f, settingsRowY(t, f, "Active pane border"), "Green", colBarActiveFG, accentColorCodes[0])
+
+	// Options that are not colors keep the selected-row highlight.
+	s.handleInput(c, []byte("\x1b[B")) // Active pane border
+	s.handleInput(c, []byte("\x1b[B")) // Cursor shape
+	f = *c.frame
+	checkValueChip(t, f, settingsRowY(t, f, "Cursor shape"), "Block", colBarActiveFG, accentColorCodes[0])
+}
+
+func accentColorIndex(t *testing.T, name string) int {
+	t.Helper()
+	for i, n := range accentColorNames {
+		if n == name {
+			return i
+		}
+	}
+	t.Fatalf("accent %q is not in the palette", name)
+	return 0
 }

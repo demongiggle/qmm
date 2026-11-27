@@ -57,7 +57,7 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 
 	st.setByID(settingCursorShape, 2)
 	st.setByID(settingCursorBlink, 0)
-	st.setByID(settingBorderColor, 1)
+	st.setByID(settingBorderColor, accentColorIndex(t, "Pink"))
 	st.setByID(settingCopyKey, 1)                                    // Ctrl-Shift-X, away from the Ctrl-Y default
 	st.setByID(settingCopyStatusColor, statusColorIndex(t, "Green")) // away from the Blue default
 	st.setByID(settingStatusBarColor, statusColorIndex(t, "Navy"))
@@ -74,8 +74,8 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	if loaded.cursorShape() != protocol.CursorShapeBar || !loaded.cursorBlink() {
 		t.Fatalf("loaded cursor = shape:%d blink:%v, want blinking bar", loaded.cursorShape(), loaded.cursorBlink())
 	}
-	if loaded.borderColor() != 39 {
-		t.Fatalf("loaded border color = %d, want cyan 39", loaded.borderColor())
+	if got, want := loaded.borderColor(), accentColorCodes[accentColorIndex(t, "Pink")]; got != want {
+		t.Fatalf("loaded border color = %d, want the Pink accent %d", got, want)
 	}
 	if got, want := loaded.copyStatusStyle(), statusBarColors[statusColorIndex(t, "Green")]; got != want {
 		t.Fatalf("loaded copy status style = %+v, want %+v", got, want)
