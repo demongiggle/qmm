@@ -617,13 +617,15 @@ func copyKeySequence(st *settingsState) string {
 		return "\x19"
 	}
 	switch st.text(def) {
+	case "Ctrl-Y":
+		return "\x19"
 	case "Ctrl-Shift-X":
 		return "\x1b[27;6;120~"
 	case "Ctrl-Shift-C":
 		return "\x1b[27;6;99~"
 	case "Ctrl-Insert":
 		return "\x1b[2;5~"
-	default: // Ctrl-Y
+	default: // unknown value: keep the safest key
 		return "\x19"
 	}
 }

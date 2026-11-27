@@ -28,7 +28,7 @@ and both selection paths compare the whole keystroke against it:
 
 - `internal/server/actions.go:490` — pending mouse selection
 - `internal/server/copy_mode.go:668` — copy mode
-- `internal/server/settings.go:611` — the mapping
+- `internal/server/settings.go:614` — the mapping
 
 | Setting | Bytes on the wire |
 | :--- | :--- |
