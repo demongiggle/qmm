@@ -94,6 +94,16 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
+	// While the layout menu is open, mouse/action messages dismiss the overlay
+	// instead of changing panes or windows underneath it.
+	if c.layoutsOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			s.closeLayoutsMenu(c)
+			return false
+		}
+	}
 	// While the settings page is open, mouse/action messages dismiss the
 	// overlay instead of changing panes or windows underneath it.
 	if c.settingsOpen {
@@ -549,6 +559,8 @@ var prefixBindings = []prefixBinding{
 	prefixBind("s", func(s *Server, c *clientConn) { s.openSettings(c) }),
 	// Multi-session switcher and creator (Shift-S pairs with lowercase s).
 	prefixBind("S", func(s *Server, c *clientConn) { s.openSessionsMenu(c) }),
+	// Saved per-window layouts: restore into a new window, save, or delete.
+	prefixBind("L", func(s *Server, c *clientConn) { s.openLayoutsMenu(c) }),
 	prefixBind("z", func(s *Server, c *clientConn) { s.toggleZoom() }),
 	prefixBind("d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }),
 	prefixBind("?", func(s *Server, c *clientConn) { s.toggleHelp(c) }),
@@ -673,6 +685,11 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 	if c.sessionsOpen {
 		c.clearRepeat()
 		s.handleSessionsMenuInput(c, data)
+		return
+	}
+	if c.layoutsOpen {
+		c.clearRepeat()
+		s.handleLayoutsMenuInput(c, data)
 		return
 	}
 	if c.settingsOpen {

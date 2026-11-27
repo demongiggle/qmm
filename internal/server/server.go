@@ -82,6 +82,13 @@ type Server struct {
 	// shutdownRequested is set by the confirmed prefix+& chord; Run performs
 	// the actual teardown after the current message is handled.
 	shutdownRequested bool
+
+	// Saved window layouts. layouts is replaced only after a successful read
+	// or write; layoutsReadOnly protects a file that could not be recovered.
+	layoutsPath     string
+	layouts         []savedLayout
+	layoutsErr      string
+	layoutsReadOnly bool
 }
 
 type clientMsg struct {
@@ -158,6 +165,19 @@ type clientConn struct {
 	sessionsInput   string
 	sessionsError   string
 
+	// prefix+L opens a saved-layout menu local to this client. The layouts
+	// themselves are shared and persisted; only the view state is per-client.
+	layoutsOpen             bool
+	layoutsList             []savedLayout
+	layoutsCursor           int
+	layoutsTop              int
+	layoutsNaming           bool
+	layoutsInput            string
+	layoutsError            string
+	layoutsMessage          string
+	layoutsConfirmOverwrite string
+	layoutsConfirmDelete    string
+
 	// Prefix-key state machine.
 	prefixArmed bool
 	prefixAt    time.Time
@@ -199,6 +219,7 @@ func Run(cfg Config) error {
 	}
 	s.sock = sock
 	s.initConfig(sessions.LogPath(s.sock, s.name))
+	s.initLayouts()
 
 	// Serialize concurrent server starts with a lock file held for the
 	// server's lifetime. This prevents two daemons from racing to bind
@@ -532,6 +553,16 @@ func (s *Server) broadcast() {
 		c.comp.sessionsNaming = c.sessionsNaming
 		c.comp.sessionsInput = c.sessionsInput
 		c.comp.sessionsError = c.sessionsError
+		c.comp.layoutsOpen = c.layoutsOpen
+		c.comp.layoutsList = c.layoutsList
+		c.comp.layoutsCursor = c.layoutsCursor
+		c.comp.layoutsTop = c.layoutsTop
+		c.comp.layoutsNaming = c.layoutsNaming
+		c.comp.layoutsInput = c.layoutsInput
+		c.comp.layoutsError = c.layoutsError
+		c.comp.layoutsMessage = c.layoutsMessage
+		c.comp.layoutsConfirmOverwrite = c.layoutsConfirmOverwrite
+		c.comp.layoutsConfirmDelete = c.layoutsConfirmDelete
 		c.comp.copyMode = c.copyMode
 		c.comp.selection = c.selection
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
@@ -541,6 +572,8 @@ func (s *Server) broadcast() {
 		c.settingsTop = c.comp.settingsTop
 		c.sessionsCursor = c.comp.sessionsCursor
 		c.sessionsTop = c.comp.sessionsTop
+		c.layoutsCursor = c.comp.layoutsCursor
+		c.layoutsTop = c.comp.layoutsTop
 		c.enqueueFrame(frame)
 	}
 }
@@ -550,6 +583,9 @@ func (s *Server) refreshWindowNames() {
 		return
 	}
 	for _, w := range s.sess.windows {
+		if w.pinnedName {
+			continue
+		}
 		p := s.sess.panes[w.activePane]
 		if p == nil {
 			continue

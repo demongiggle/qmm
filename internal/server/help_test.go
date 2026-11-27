@@ -43,6 +43,7 @@ func TestPrefixQuestionOpensStyledHelp(t *testing.T) {
 		"QMM HELP", "PREFIX: Ctrl-a",
 		"PANES", "WINDOWS", "LAYOUT", "SESSION", "MOUSE",
 		"C-a ?", "Show this help", "Esc/q close",
+		"C-a L", "Saved layouts",
 		"C-a z", "Floating zoom",
 		"Double-click", "Zoom / restore",
 		"C-a &", "Kill session (y/n)",

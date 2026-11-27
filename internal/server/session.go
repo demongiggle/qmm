@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/creack/pty"
@@ -42,6 +44,9 @@ type window struct {
 	activePane int
 	zoomed     bool
 	name       string
+	// pinnedName keeps an explicit layout name visible instead of letting
+	// automatic process-based renaming replace it.
+	pinnedName bool
 }
 
 // session is one qmm session: a named set of windows.
@@ -135,6 +140,9 @@ func (s *session) lowestFreeIndex() int {
 // leader has exited but the group lives on, /proc/<pgid> lookups fail and we
 // fall back to "" (the window keeps its previous name).
 func fgInfo(p *pane) (name, cwd string) {
+	if p == nil || p.ptmx == nil {
+		return "", ""
+	}
 	fd := p.ptmx.Fd()
 	pgid, err := tcgetpgrp(fd)
 	if err != nil || pgid <= 0 {
@@ -161,11 +169,22 @@ func tcgetpgrp(fd uintptr) (int, error) {
 
 // spawnPane starts a shell for a new pane with the given working directory.
 func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	return s.spawnPaneCommand(dir, nil, cols, rows)
+}
+
+// spawnPaneCommand starts either the user's login shell (nil argv) or a saved
+// command (argv) inside a fresh PTY. Commands are exec'd directly so a restored
+// pane behaves like any other qmm pane and closes when its command exits.
+func (s *session) spawnPaneCommand(dir string, argv []string, cols, rows int) (*pane, error) {
+	if len(argv) > 0 && argv[0] == "" {
+		return nil, fmt.Errorf("spawn command: empty argv[0]")
 	}
-	cmd := exec.Command(shell, "-l")
+	var cmd *exec.Cmd
+	if len(argv) == 0 {
+		cmd = exec.Command(shellPath(), "-l")
+	} else {
+		cmd = exec.Command(argv[0], argv[1:]...)
+	}
 	// Be explicit: the child gets its own session and controlling tty so a
 	// process-group kill aimed at a pane can never hit our own group.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
@@ -189,7 +208,11 @@ func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
 	}
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	if err != nil {
-		return nil, fmt.Errorf("spawn shell: %w", err)
+		what := "shell"
+		if len(argv) > 0 {
+			what = "command"
+		}
+		return nil, fmt.Errorf("spawn %s: %w", what, err)
 	}
 
 	id := s.nextPaneID
@@ -211,6 +234,98 @@ func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
 		p.notifyExit(s.exitCh)
 	}()
 	return p, nil
+}
+
+func shellPath() string {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	return shell
+}
+
+const (
+	maxCommandArgs     = 64
+	maxCommandArgBytes = 4096
+)
+
+var shellBases = map[string]bool{
+	"ash": true, "bash": true, "csh": true, "dash": true, "elvish": true,
+	"fish": true, "ksh": true, "mksh": true, "nu": true, "pdksh": true,
+	"pwsh": true, "sh": true, "tcsh": true, "xonsh": true, "yash": true,
+	"zsh": true,
+}
+
+// foregroundProcess inspects the foreground process group of a pane. It returns
+// the full argv, the process's current working directory, and whether argv looks
+// like an idle login/interactive shell. A shell pane saves no command: restore
+// opens a fresh shell in the saved cwd instead.
+func foregroundProcess(p *pane) (argv []string, cwd string, isShell bool) {
+	if p == nil || p.ptmx == nil {
+		return nil, "", false
+	}
+	pgid, err := tcgetpgrp(p.ptmx.Fd())
+	if err != nil || pgid <= 0 {
+		return nil, "", false
+	}
+	if b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pgid)); err == nil {
+		argv = splitProcCmdline(b)
+	}
+	if d, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pgid)); err == nil {
+		cwd = d
+	}
+	return argv, cwd, isShellArgv(argv)
+}
+
+// splitProcCmdline parses /proc/<pid>/cmdline and returns nil when the command
+// cannot be persisted safely (invalid UTF-8, too many arguments, or too large).
+func splitProcCmdline(b []byte) []string {
+	parts := strings.Split(string(b), "\x00")
+	if len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return cleanCommandArgv(parts)
+}
+
+func cleanCommandArgv(argv []string) []string {
+	if len(argv) == 0 || len(argv) > maxCommandArgs || argv[0] == "" {
+		return nil
+	}
+	total := 0
+	for _, arg := range argv {
+		if !utf8.ValidString(arg) {
+			return nil
+		}
+		total += len(arg)
+		if total > maxCommandArgBytes {
+			return nil
+		}
+	}
+	out := make([]string, len(argv))
+	copy(out, argv)
+	return out
+}
+
+func isShellArgv(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	base := strings.TrimPrefix(filepath.Base(argv[0]), "-")
+	if !shellBases[base] {
+		return false
+	}
+	if len(argv) == 1 {
+		return true
+	}
+	// qmm starts login shells with a single -l/--login/interactive flag. A
+	// shell running a script or -c command is a real command worth restoring.
+	if len(argv) == 2 {
+		switch argv[1] {
+		case "-l", "--login", "-i", "--interactive":
+			return true
+		}
+	}
+	return false
 }
 
 // notifyExit reports the pane's death exactly once.

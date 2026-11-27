@@ -202,6 +202,97 @@ func TestResizeSplitByID(t *testing.T) {
 	}
 }
 
+func TestTreeSpecRoundTripPreservesRatiosAndOrder(t *testing.T) {
+	tr := New(1)
+	bounds := Rect{0, 0, 100, 40}
+	if !tr.Split(1, 2, Vertical) || !tr.Split(2, 3, Horizontal) {
+		t.Fatal("split failed")
+	}
+	// Move both dividers off their default ratios so the round-trip has
+	// something specific to preserve.
+	if !tr.Resize(1, Right, 7, bounds) {
+		t.Fatal("root resize failed")
+	}
+	if !tr.Resize(2, Down, 3, bounds) {
+		t.Fatal("nested resize failed")
+	}
+
+	spec := tr.Spec()
+	ids := []int{101, 102, 103}
+	restored, err := FromSpec(spec, ids)
+	if err != nil {
+		t.Fatalf("FromSpec: %v", err)
+	}
+	if got, want := restored.Panes(), ids; !equalInts(got, want) {
+		t.Fatalf("restored panes = %v, want %v", got, want)
+	}
+
+	wantRects := tr.Compute(bounds)
+	gotRects := restored.Compute(bounds)
+	order := tr.Panes()
+	for i, id := range order {
+		if got, want := gotRects[ids[i]], wantRects[id]; got != want {
+			t.Fatalf("pane %d rect = %+v, want %+v", id, got, want)
+		}
+	}
+}
+
+func TestTreeSpecSinglePane(t *testing.T) {
+	tr := New(7)
+	restored, err := FromSpec(tr.Spec(), []int{42})
+	if err != nil {
+		t.Fatalf("FromSpec: %v", err)
+	}
+	if got, want := restored.Panes(), []int{42}; !equalInts(got, want) {
+		t.Fatalf("panes = %v, want %v", got, want)
+	}
+}
+
+func TestFromSpecRejectsInvalidTrees(t *testing.T) {
+	leaf := func(i int) Spec { return Spec{Pane: &i} }
+	split := func(ratio float64, children ...Spec) Spec {
+		return Spec{Split: specVertical, Ratio: ratio, Children: children}
+	}
+	dup := 0
+	out := 2
+	cases := []struct {
+		name  string
+		spec  Spec
+		panes []int
+	}{
+		{"no panes", Spec{}, nil},
+		{"leaf with split", Spec{Pane: &dup, Split: specVertical}, []int{1}},
+		{"missing direction", Spec{Ratio: 0.5, Children: []Spec{leaf(0), leaf(1)}}, []int{1, 2}},
+		{"unknown direction", Spec{Split: "diagonal", Ratio: 0.5, Children: []Spec{leaf(0), leaf(1)}}, []int{1, 2}},
+		{"zero ratio", split(0, leaf(0), leaf(1)), []int{1, 2}},
+		{"one ratio", split(1, leaf(0), leaf(1)), []int{1, 2}},
+		{"one child", split(0.5, leaf(0)), []int{1}},
+		{"three children", split(0.5, leaf(0), leaf(1), leaf(2)), []int{1, 2, 3}},
+		{"duplicate leaf", split(0.5, leaf(0), leaf(0)), []int{1, 2}},
+		{"out of range", split(0.5, leaf(0), leaf(out)), []int{1, 2}},
+		{"missing leaf", split(0.5, leaf(0), leaf(2)), []int{1, 2, 3}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := FromSpec(tc.spec, tc.panes); err == nil {
+				t.Fatal("FromSpec accepted an invalid spec")
+			}
+		})
+	}
+}
+
+func equalInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestContains(t *testing.T) {
 	r := Rect{2, 3, 10, 5}
 	for _, p := range [][2]int{{2, 3}, {11, 7}, {5, 4}} {

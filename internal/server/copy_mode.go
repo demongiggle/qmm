@@ -492,6 +492,7 @@ func (s *Server) openCopyMode(c *clientConn, scrollUp int) {
 	c.settingsOpen = false
 	c.displayPanesOpen = false
 	c.confirmOpen = false
+	c.resetLayoutsMenu()
 	c.copyMode = st
 	c.forceFull = true
 	c.clearRepeat()

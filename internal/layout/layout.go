@@ -3,7 +3,11 @@
 // split with a direction and a ratio for the leading child.
 package layout
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Split direction of an internal node.
 const (
@@ -78,6 +82,130 @@ type Tree struct {
 	root      *node
 	nextID    int
 	paneCount int
+}
+
+// Spec is a serializable description of a split tree. A leaf sets Pane to its
+// index in the saved pane list; an internal node sets Split, Ratio, and exactly
+// two Children. Leaf indexes follow depth-first order, the same order as
+// Tree.Panes.
+type Spec struct {
+	Pane     *int    `toml:"pane,omitempty"`
+	Split    string  `toml:"split,omitempty"`
+	Ratio    float64 `toml:"ratio,omitempty"`
+	Children []Spec  `toml:"children,omitempty"`
+}
+
+const (
+	specVertical   = "vertical"
+	specHorizontal = "horizontal"
+	maxSpecDepth   = 64
+	maxSpecPanes   = 64
+)
+
+// Spec returns a serializable copy of the tree's shape and ratios.
+func (t *Tree) Spec() Spec {
+	if t == nil || t.root == nil {
+		return Spec{}
+	}
+	next := 0
+	return specForNode(t.root, &next)
+}
+
+func specForNode(n *node, next *int) Spec {
+	if n.leaf {
+		idx := *next
+		*next = idx + 1
+		return Spec{Pane: &idx}
+	}
+	split := specVertical
+	if n.dir == Horizontal {
+		split = specHorizontal
+	}
+	return Spec{
+		Split: split,
+		Ratio: n.ratio,
+		Children: []Spec{
+			specForNode(n.left, next),
+			specForNode(n.right, next),
+		},
+	}
+}
+
+// FromSpec builds a tree from a saved spec, assigning each leaf the pane ID at
+// the corresponding index in paneIDs. The spec is fully validated before it is
+// returned so a hand-edited layouts file cannot create a malformed tree.
+func FromSpec(spec Spec, paneIDs []int) (*Tree, error) {
+	if len(paneIDs) == 0 {
+		return nil, fmt.Errorf("layout: spec has no panes")
+	}
+	if len(paneIDs) > maxSpecPanes {
+		return nil, fmt.Errorf("layout: spec has %d panes, maximum is %d", len(paneIDs), maxSpecPanes)
+	}
+	t := &Tree{nextID: 1, paneCount: len(paneIDs)}
+	used := make([]bool, len(paneIDs))
+	root, err := t.fromSpec(spec, paneIDs, used, 0)
+	if err != nil {
+		return nil, err
+	}
+	for i, ok := range used {
+		if !ok {
+			return nil, fmt.Errorf("layout: pane index %d is missing from the tree", i)
+		}
+	}
+	t.root = root
+	return t, nil
+}
+
+func (t *Tree) fromSpec(s Spec, paneIDs []int, used []bool, depth int) (*node, error) {
+	if depth > maxSpecDepth {
+		return nil, fmt.Errorf("layout: tree is deeper than %d levels", maxSpecDepth)
+	}
+	if s.Pane != nil {
+		if s.Split != "" || s.Ratio != 0 || len(s.Children) != 0 {
+			return nil, fmt.Errorf("layout: leaf with pane index %d also has split data", *s.Pane)
+		}
+		idx := *s.Pane
+		if idx < 0 || idx >= len(paneIDs) {
+			return nil, fmt.Errorf("layout: pane index %d is out of range", idx)
+		}
+		if used[idx] {
+			return nil, fmt.Errorf("layout: pane index %d appears more than once", idx)
+		}
+		used[idx] = true
+		n := &node{id: t.nextID, leaf: true, pane: paneIDs[idx]}
+		t.nextID++
+		return n, nil
+	}
+
+	var dir Direction
+	switch strings.ToLower(strings.TrimSpace(s.Split)) {
+	case specVertical:
+		dir = Vertical
+	case specHorizontal:
+		dir = Horizontal
+	case "":
+		return nil, fmt.Errorf("layout: node is missing a split direction")
+	default:
+		return nil, fmt.Errorf("layout: unknown split direction %q", s.Split)
+	}
+	if len(s.Children) != 2 {
+		return nil, fmt.Errorf("layout: split node has %d children, want 2", len(s.Children))
+	}
+	if !(s.Ratio > 0 && s.Ratio < 1) {
+		return nil, fmt.Errorf("layout: split ratio %v is outside (0,1)", s.Ratio)
+	}
+	n := &node{id: t.nextID, dir: dir, ratio: s.Ratio}
+	t.nextID++
+	left, err := t.fromSpec(s.Children[0], paneIDs, used, depth+1)
+	if err != nil {
+		return nil, err
+	}
+	right, err := t.fromSpec(s.Children[1], paneIDs, used, depth+1)
+	if err != nil {
+		return nil, err
+	}
+	n.left, n.right = left, right
+	return n, nil
 }
 
 // New returns a tree whose single root leaf is paneID.
