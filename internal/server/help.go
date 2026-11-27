@@ -51,6 +51,7 @@ var helpSections = []helpSection{
 	{
 		Title: "Session",
 		Items: []helpItem{
+			{"C-a S", "Sessions (switch / new)"},
 			{"C-a &", "Kill session (y/n)"},
 			{"C-a d", "Detach"},
 			{"C-a C-a", "Send literal ^A"},
@@ -105,6 +106,8 @@ func (s *Server) openHelp(c *clientConn) {
 	c.helpOpen = true
 	c.helpTop = 0
 	c.settingsOpen = false
+	c.sessionsOpen = false
+	c.sessionsNaming = false
 	c.forceFull = true
 	c.clearRepeat()
 	s.broadcast()

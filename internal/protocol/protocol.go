@@ -76,6 +76,10 @@ type Detach struct{}
 // Shutdown asks the server to terminate the whole session (qmm kill-server).
 type Shutdown struct{}
 
+// InfoRequest asks a running session server for its SessionInfo without
+// attaching as a client. Like Shutdown, it is accepted before Hello.
+type InfoRequest struct{}
+
 // ActionFocus requests keyboard focus on the pane containing cell (X, Y).
 type ActionFocus struct {
 	X, Y int
@@ -241,12 +245,32 @@ type Goodbye struct {
 	Reason string
 }
 
+// SessionInfo describes a running session daemon in reply to InfoRequest.
+type SessionInfo struct {
+	Name      string
+	Windows   int
+	Panes     int
+	Clients   int
+	CreatedAt int64
+	Version   string
+	PID       int
+}
+
+// SwitchSession instructs an attached client to disconnect from the current
+// session and switch to Name (spawning a fresh session first when Create is
+// true).
+type SwitchSession struct {
+	Name   string
+	Create bool
+}
+
 func init() {
 	gob.Register(Hello{})
 	gob.Register(Input{})
 	gob.Register(Resize{})
 	gob.Register(Detach{})
 	gob.Register(Shutdown{})
+	gob.Register(InfoRequest{})
 	gob.Register(ActionFocus{})
 	gob.Register(ActionSelectWindow{})
 	gob.Register(ActionNewWindow{})
@@ -270,6 +294,8 @@ func init() {
 	gob.Register(Notice{})
 	gob.Register(Clipboard{})
 	gob.Register(Goodbye{})
+	gob.Register(SessionInfo{})
+	gob.Register(SwitchSession{})
 }
 
 // Codec wraps a net.Conn with gob encoding. Reads are unsynchronised (one
@@ -317,6 +343,8 @@ func derefMessage(msg interface{}) interface{} {
 		return *m
 	case *Shutdown:
 		return *m
+	case *InfoRequest:
+		return *m
 	case *ActionFocus:
 		return *m
 	case *ActionSelectWindow:
@@ -356,6 +384,10 @@ func derefMessage(msg interface{}) interface{} {
 	case *Clipboard:
 		return *m
 	case *Goodbye:
+		return *m
+	case *SessionInfo:
+		return *m
+	case *SwitchSession:
 		return *m
 	default:
 		return msg

@@ -6,53 +6,54 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/sessions"
 )
 
-// Config controls socket placement.
+// Config controls socket placement and session identity.
 type Config struct {
 	// SocketDir overrides the socket directory; empty uses the default
 	// resolution ($QMM_SOCKET_DIR, then $XDG_RUNTIME_DIR/qmm-<uid>,
 	// then /tmp/qmm-<uid>).
 	SocketDir string
+	// SessionName selects the session name (socket filename). Empty defaults
+	// to sessions.DefaultName ("default").
+	SessionName string
+	// Version is the build version reported in SessionInfo queries.
+	Version string
+}
+
+func (c Config) sessionName() string {
+	if c.SessionName == "" {
+		return sessions.DefaultName
+	}
+	return c.SessionName
 }
 
 // SocketPath resolves the socket path and ensures the directory exists.
 func (c Config) SocketPath() (string, error) {
-	dir := c.socketDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "default"), nil
+	return sessions.SocketPath(c.SocketDir, c.sessionName())
 }
 
 func (c Config) socketDir() string {
-	if c.SocketDir != "" {
-		return c.SocketDir
-	}
-	if d := os.Getenv("QMM_SOCKET_DIR"); d != "" {
-		return d
-	}
-	if d := os.Getenv("XDG_RUNTIME_DIR"); d != "" {
-		return filepath.Join(d, fmt.Sprintf("qmm-%d", os.Getuid()))
-	}
-	base := os.TempDir()
-	return filepath.Join(base, fmt.Sprintf("qmm-%d", os.Getuid()))
+	return sessions.ResolveDir(c.SocketDir)
 }
 
 // Server is the session daemon. All session state is confined to the
 // event loop goroutine; pane goroutines only notify it via channels.
 type Server struct {
-	cfg  Config
-	ln   net.Listener
-	sock string
-	pid  string
+	cfg       Config
+	name      string
+	version   string
+	createdAt time.Time
+	ln        net.Listener
+	sock      string
+	pid       string
 
 	configPath           string
 	configLogPath        string
@@ -67,6 +68,7 @@ type Server struct {
 	msgs      chan clientMsg
 	newConns  chan *clientConn
 	deadConns chan *clientConn
+	infoReqs  chan chan protocol.SessionInfo
 	renderCh  chan struct{}
 	shutdown  chan struct{}
 
@@ -139,6 +141,16 @@ type clientConn struct {
 	settingsCursor int
 	settingsTop    int
 
+	// prefix+S opens a session switcher/creator overlay local to this client.
+	sessionsOpen    bool
+	sessionsLoading bool
+	sessionsList    []protocol.SessionInfo
+	sessionsCursor  int
+	sessionsTop     int
+	sessionsNaming  bool
+	sessionsInput   string
+	sessionsError   string
+
 	// Prefix-key state machine.
 	prefixArmed bool
 	prefixAt    time.Time
@@ -153,8 +165,12 @@ type clientConn struct {
 // Run starts the server and blocks until shutdown (prefix+&, qmm
 // kill-server, or the last pane exiting).
 func Run(cfg Config) error {
+	name := cfg.sessionName()
 	s := &Server{
 		cfg:       cfg,
+		name:      name,
+		version:   cfg.Version,
+		createdAt: time.Now(),
 		sess:      newSession(),
 		cols:      80,
 		rows:      24,
@@ -163,9 +179,11 @@ func Run(cfg Config) error {
 		msgs:      make(chan clientMsg, 128),
 		newConns:  make(chan *clientConn, 16),
 		deadConns: make(chan *clientConn, 16),
+		infoReqs:  make(chan chan protocol.SessionInfo, 16),
 		renderCh:  make(chan struct{}, 1),
 		shutdown:  make(chan struct{}, 1),
 	}
+	s.sess.name = name
 	s.sess.exitCh = s.paneExit
 	s.sess.onOutput = s.scheduleRender
 	sock, err := cfg.SocketPath()
@@ -173,7 +191,7 @@ func Run(cfg Config) error {
 		return err
 	}
 	s.sock = sock
-	s.initConfig(filepath.Join(filepath.Dir(sock), "server.log"))
+	s.initConfig(sessions.LogPath(s.sock, s.name))
 
 	// Serialize concurrent server starts with a lock file held for the
 	// server's lifetime. This prevents two daemons from racing to bind
@@ -228,6 +246,8 @@ func Run(cfg Config) error {
 			s.registerClient(c)
 		case c := <-s.deadConns:
 			s.removeClient(c)
+		case reply := <-s.infoReqs:
+			reply <- s.sessionInfo()
 		case in := <-s.msgs:
 			shutdown = s.handleClientMessage(in)
 		case paneID := <-s.paneExit:
@@ -270,6 +290,21 @@ func (s *Server) acceptLoop(out chan<- *clientConn) {
 				select {
 				case s.shutdown <- struct{}{}:
 				default:
+				}
+				_ = c.conn.Close()
+				return
+			}
+			if _, ok := msg.(protocol.InfoRequest); ok {
+				reply := make(chan protocol.SessionInfo, 1)
+				select {
+				case s.infoReqs <- reply:
+					select {
+					case info := <-reply:
+						_ = c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+						_ = c.codec.Send(info)
+					case <-time.After(2 * time.Second):
+					}
+				case <-time.After(2 * time.Second):
 				}
 				_ = c.conn.Close()
 				return
@@ -481,6 +516,14 @@ func (s *Server) broadcast() {
 		c.comp.settingsOpen = c.settingsOpen
 		c.comp.settingsCursor = c.settingsCursor
 		c.comp.settingsTop = c.settingsTop
+		c.comp.sessionsOpen = c.sessionsOpen
+		c.comp.sessionsLoading = c.sessionsLoading
+		c.comp.sessionsList = c.sessionsList
+		c.comp.sessionsCursor = c.sessionsCursor
+		c.comp.sessionsTop = c.sessionsTop
+		c.comp.sessionsNaming = c.sessionsNaming
+		c.comp.sessionsInput = c.sessionsInput
+		c.comp.sessionsError = c.sessionsError
 		c.comp.copyMode = c.copyMode
 		c.comp.selection = c.selection
 		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
@@ -488,6 +531,8 @@ func (s *Server) broadcast() {
 		c.helpTop = c.comp.helpTop
 		c.settingsCursor = c.comp.settingsCursor
 		c.settingsTop = c.comp.settingsTop
+		c.sessionsCursor = c.comp.sessionsCursor
+		c.sessionsTop = c.comp.sessionsTop
 		c.enqueueFrame(frame)
 	}
 }

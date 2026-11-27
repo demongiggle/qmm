@@ -70,6 +70,15 @@ type compositor struct {
 	settingsCursor int
 	settingsTop    int
 
+	sessionsOpen    bool
+	sessionsLoading bool
+	sessionsList    []protocol.SessionInfo
+	sessionsCursor  int
+	sessionsTop     int
+	sessionsNaming  bool
+	sessionsInput   string
+	sessionsError   string
+
 	copyMode *copyModeState
 
 	// selection is a mouse drag selection: a frozen snapshot of one pane that
@@ -118,6 +127,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)
 		} else if c.helpOpen {
 			c.drawHelp(&frame, setCell, cols, rows)
+		} else if c.sessionsOpen {
+			c.drawSessionsMenu(&frame, setCell, cols, rows, s.sessionName(), opts)
 		} else if c.settingsOpen {
 			c.drawSettings(&frame, setCell, cols, rows, opts)
 		} else if c.displayPanes {
@@ -314,6 +325,19 @@ func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int,
 	reserve := 0
 	if showClock {
 		reserve = displayPanesClockWidth + 2 // clock plus a small gap
+	}
+	if badge := fmt.Sprintf("[%s]", s.sessionName()); len(badge) > 0 && col < cols-reserve {
+		badgeRunes := []rune(badge)
+		if col+len(badgeRunes) > cols-reserve {
+			badgeRunes = []rune(fitHelpText(badge, max(0, cols-reserve-col)))
+		}
+		for _, r := range badgeRunes {
+			setCell(col, sbY, r, bar.accent, bar.bg, protocol.StyleBold)
+			col++
+		}
+		if col < cols-reserve {
+			col++ // separator gap before window tabs
+		}
 	}
 	for _, idx := range s.sortedWindowIndices() {
 		ww := s.windows[idx]

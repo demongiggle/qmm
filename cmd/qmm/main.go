@@ -1,5 +1,5 @@
-// Command qmm is a terminal multiplexer: panes in windows, multiple
-// clients, mouse support. Run `qmm` to start or attach to the session.
+// Command qmm is a terminal multiplexer: panes in windows, multiple sessions,
+// multiple clients, mouse support. Run `qmm` to start or attach to a session.
 package main
 
 import (
@@ -11,13 +11,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/demongiggle/qmm/internal/client"
 	"github.com/demongiggle/qmm/internal/protocol"
 	"github.com/demongiggle/qmm/internal/server"
+	"github.com/demongiggle/qmm/internal/sessions"
 	"github.com/demongiggle/qmm/internal/update"
 )
 
@@ -26,29 +27,44 @@ import (
 // release when qmm update runs.
 var version = "dev"
 
+// startupExe captures the clean executable path before any self-update can
+// replace the binary on disk (which appends " (deleted)" to /proc/self/exe on
+// Linux).
+var startupExe string
+
 func main() {
+	startupExe, _ = os.Executable()
+
 	if len(os.Args) < 2 {
-		if err := ensureServerAndAttach(); err != nil {
+		if err := ensureDefaultAndAttach(); err != nil {
 			fatal(err)
 		}
 		return
 	}
 	switch os.Args[1] {
 	case "server":
-		// Hidden internal subcommand: run the session daemon in the foreground.
-		if err := server.Run(server.Config{}); err != nil {
+		// Hidden internal subcommand: run one session daemon in the foreground.
+		if err := runServer(os.Args[2:]); err != nil {
+			fatal(err)
+		}
+	case "ls":
+		if err := runList(os.Args[2:], "", os.Stdout); err != nil {
+			fatal(err)
+		}
+	case "new":
+		if err := runNew(os.Args[2:]); err != nil {
 			fatal(err)
 		}
 	case "attach":
-		sock, err := socketPath()
-		if err != nil {
+		if err := runAttach(os.Args[2:]); err != nil {
 			fatal(err)
 		}
-		if err := attach(sock); err != nil {
+	case "kill-session":
+		if err := runKillSession(os.Args[2:], "", os.Stdout); err != nil {
 			fatal(err)
 		}
 	case "kill-server":
-		if err := killServer(); err != nil {
+		if err := runKillServer(os.Args[2:], "", os.Stdout); err != nil {
 			fatal(err)
 		}
 	case "update":
@@ -70,17 +86,21 @@ func usage(w *os.File) {
 	fmt.Fprintf(w, `qmm %s — a terminal multiplexer
 
 Usage:
-  qmm              Start the session server if needed and attach to it
-  qmm attach       Attach to the running session (fails if none)
-  qmm kill-server  Terminate the session server and all panes
-  qmm update       Install the latest qmm release
-  qmm --help       Show this help
-  qmm --version    Show version
+  qmm                        Attach to the default (or sole) session, starting it if needed
+  qmm ls                     List all running sessions
+  qmm new [name]             Start a fresh session (auto-named if omitted) and attach
+  qmm attach [name]          Attach to a running session (default if omitted)
+  qmm kill-session <name>    Terminate a specific session
+  qmm kill-server [name]     Terminate a session (or --all to stop every session)
+  qmm update                 Install the latest qmm release
+  qmm --help                 Show this help
+  qmm --version              Show version
 
 Self-update: qmm update downloads the newest release binary for this platform
 and atomically replaces the executable. qmm update --arch arm64 chooses an
-architecture and qmm update --pre also considers release candidates. A running
-server keeps the previous version until it is restarted.
+architecture and qmm update --pre also considers release candidates. Existing
+sessions keep running on the previous binary; launching a new session (from the
+CLI or via Ctrl-a S) always starts a fresh daemon from the updated executable.
 
 Inside qmm, press Ctrl-a to send a command prefix, followed by:
   |         split left/right (new pane to the right)
@@ -92,6 +112,8 @@ Inside qmm, press Ctrl-a to send a command prefix, followed by:
   o         cycle to next pane
   z         toggle floating zoom (centered, at least 2%% margins)
   Ctrl-← →  resize pane; hold Ctrl to repeat (also: Ctrl-↑ Ctrl-↓)
+  s         settings
+  S         sessions menu (switch or launch a fresh session)
   d         detach (session keeps running)
   Ctrl-a    send a literal Ctrl-a to the application
   ?         show categorized key help (Esc/q closes)
@@ -109,13 +131,29 @@ Set QMM_SOCKET_DIR to customize the socket location.
 `, version)
 }
 
-func socketPath() (string, error) {
-	return server.Config{}.SocketPath()
-}
-
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "qmm: %v\n", err)
 	os.Exit(1)
+}
+
+func runServer(args []string) error {
+	fs := flag.NewFlagSet("qmm server", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var name string
+	fs.StringVar(&name, "session", sessions.DefaultName, "session name")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("server does not accept positional arguments")
+	}
+	return server.Run(server.Config{
+		SessionName: name,
+		Version:     version,
+	})
 }
 
 // runUpdate installs the latest GitHub release over the qmm executable.
@@ -132,14 +170,146 @@ func runUpdate(arguments []string, stdout, stderr io.Writer) error {
 	return err
 }
 
-// ensureServerAndAttach starts the daemon if it isn't running, then attaches.
-func ensureServerAndAttach() error {
-	sock, err := socketPath()
+func formatSessionLine(info protocol.SessionInfo) string {
+	winWord := "windows"
+	if info.Windows == 1 {
+		winWord = "window"
+	}
+	paneWord := "panes"
+	if info.Panes == 1 {
+		paneWord = "pane"
+	}
+	details := fmt.Sprintf("%d %s", info.Panes, paneWord)
+	if info.Clients > 0 {
+		details += fmt.Sprintf(", %d attached", info.Clients)
+	}
+	line := fmt.Sprintf("%s: %d %s (%s)", info.Name, info.Windows, winWord, details)
+	if info.Version != "" {
+		line += fmt.Sprintf(" [%s]", info.Version)
+	}
+	return line
+}
+
+func runList(args []string, dirOverride string, stdout io.Writer) error {
+	if len(args) != 0 {
+		return fmt.Errorf("ls does not accept arguments")
+	}
+	list, err := sessions.List(dirOverride)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		fmt.Fprintln(stdout, "no qmm sessions running")
+		return nil
+	}
+	for _, info := range list {
+		fmt.Fprintln(stdout, formatSessionLine(info))
+	}
+	return nil
+}
+
+// ensureDefaultAndAttach attaches to "default" if running, otherwise the first
+// live session, or starts a fresh "default" session if none are running.
+func ensureDefaultAndAttach() error {
+	list, err := sessions.List("")
+	if err == nil && len(list) > 0 {
+		target := list[0].Name
+		for _, info := range list {
+			if info.Name == sessions.DefaultName {
+				target = info.Name
+				break
+			}
+		}
+		sock, err := sessions.SocketPath("", target)
+		if err != nil {
+			return err
+		}
+		return attach(sock)
+	}
+	return startAndAttach(sessions.DefaultName)
+}
+
+func runNew(args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("usage: qmm new [name]")
+	}
+	var name string
+	if len(args) == 1 {
+		name = args[0]
+		if err := sessions.ValidateName(name); err != nil {
+			return err
+		}
+	} else {
+		list, err := sessions.List("")
+		if err != nil {
+			return err
+		}
+		name = sessions.NextName(list)
+	}
+	sock, err := sessions.SocketPath("", name)
+	if err != nil {
+		return err
+	}
+	if dialable(sock) {
+		return fmt.Errorf("session %q already exists (use `qmm attach %s`)", name, name)
+	}
+	return startAndAttach(name)
+}
+
+func runAttach(args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("usage: qmm attach [name]")
+	}
+	var name string
+	if len(args) == 1 {
+		name = args[0]
+		if err := sessions.ValidateName(name); err != nil {
+			return err
+		}
+	} else {
+		var err error
+		name, err = resolveDefaultAttachTarget("")
+		if err != nil {
+			return err
+		}
+	}
+	sock, err := sessions.SocketPath("", name)
+	if err != nil {
+		return err
+	}
+	return attach(sock)
+}
+
+func resolveDefaultAttachTarget(dirOverride string) (string, error) {
+	list, err := sessions.List(dirOverride)
+	if err != nil {
+		return "", err
+	}
+	if len(list) == 0 {
+		return sessions.DefaultName, nil
+	}
+	for _, info := range list {
+		if info.Name == sessions.DefaultName {
+			return sessions.DefaultName, nil
+		}
+	}
+	if len(list) == 1 {
+		return list[0].Name, nil
+	}
+	names := make([]string, len(list))
+	for i, info := range list {
+		names[i] = info.Name
+	}
+	return "", fmt.Errorf("multiple sessions running (%s); specify one with `qmm attach <name>`", strings.Join(names, ", "))
+}
+
+func startAndAttach(name string) error {
+	sock, err := sessions.SocketPath("", name)
 	if err != nil {
 		return err
 	}
 	if !dialable(sock) {
-		if err := spawnServer(sock); err != nil {
+		if err := spawnServer(name, sock); err != nil {
 			return err
 		}
 		// Wait for the socket to come up.
@@ -163,17 +333,17 @@ func dialable(sock string) bool {
 	return true
 }
 
-func spawnServer(sock string) error {
-	exe, err := os.Executable()
+func spawnServer(name, sock string) error {
+	exe, err := sessions.ResolveExecutable(startupExe)
 	if err != nil {
 		return err
 	}
-	logPath := filepath.Join(filepath.Dir(sock), "server.log")
+	logPath := sessions.LogPath(sock, name)
 	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open server log: %w", err)
 	}
-	cmd := exec.Command(exe, "server")
+	cmd := exec.Command(exe, "server", "--session", name)
 	cmd.Stdin = nil
 	cmd.Stdout = logf
 	cmd.Stderr = logf
@@ -189,18 +359,87 @@ func spawnServer(sock string) error {
 	return nil
 }
 
-func attach(sock string) error {
-	return client.Attach(sock)
+func execArgsForSwitch(req *client.SwitchRequest) []string {
+	if req.Create {
+		if req.Name != "" {
+			return []string{"qmm", "new", req.Name}
+		}
+		return []string{"qmm", "new"}
+	}
+	if req.Name != "" {
+		return []string{"qmm", "attach", req.Name}
+	}
+	return []string{"qmm", "attach"}
 }
 
-func killServer() error {
-	sock, err := socketPath()
+func attach(sock string) error {
+	req, err := client.AttachWithSwitch(sock)
+	if err != nil {
+		return err
+	}
+	if req == nil {
+		return nil
+	}
+	// Re-exec the on-disk qmm binary so both a newly spawned session daemon
+	// and this client process run the latest installed executable.
+	exe, err := sessions.ResolveExecutable(startupExe)
+	if err != nil {
+		return fmt.Errorf("switch session: %w", err)
+	}
+	return syscall.Exec(exe, execArgsForSwitch(req), os.Environ())
+}
+
+func runKillSession(args []string, dirOverride string, stdout io.Writer) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: qmm kill-session <name>")
+	}
+	name := args[0]
+	if err := sessions.ValidateName(name); err != nil {
+		return err
+	}
+	return killNamedSession(dirOverride, name, stdout)
+}
+
+func runKillServer(args []string, dirOverride string, stdout io.Writer) error {
+	if len(args) > 1 {
+		return fmt.Errorf("usage: qmm kill-server [name | --all]")
+	}
+	if len(args) == 1 && (args[0] == "--all" || args[0] == "-a") {
+		list, err := sessions.List(dirOverride)
+		if err != nil {
+			return err
+		}
+		if len(list) == 0 {
+			return fmt.Errorf("no qmm sessions running")
+		}
+		for _, info := range list {
+			if err := killNamedSession(dirOverride, info.Name, stdout); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if len(args) == 1 {
+		if err := sessions.ValidateName(args[0]); err != nil {
+			return err
+		}
+		return killNamedSession(dirOverride, args[0], stdout)
+	}
+	name, err := resolveDefaultAttachTarget(dirOverride)
+	if err != nil {
+		return fmt.Errorf("%v; or use `qmm kill-server --all`", err)
+	}
+	return killNamedSession(dirOverride, name, stdout)
+}
+
+func killNamedSession(dirOverride, name string, stdout io.Writer) error {
+	sock, err := sessions.SocketPath(dirOverride, name)
 	if err != nil {
 		return err
 	}
 	conn, err := net.DialTimeout("unix", sock, time.Second)
 	if err != nil {
-		return fmt.Errorf("no qmm server running (socket %s)", sock)
+		return fmt.Errorf("no qmm session %q running (socket %s)", name, sock)
 	}
 	defer conn.Close()
 	codec := protocol.NewCodec(conn)
@@ -208,6 +447,6 @@ func killServer() error {
 	if err := codec.Send(protocol.Shutdown{}); err != nil {
 		return fmt.Errorf("send shutdown: %w", err)
 	}
-	fmt.Println("qmm: server shutting down")
+	fmt.Fprintf(stdout, "qmm: session %q shutting down\n", name)
 	return nil
 }

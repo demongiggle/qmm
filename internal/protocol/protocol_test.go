@@ -13,6 +13,7 @@ func TestRoundTrip(t *testing.T) {
 		Resize{Cols: 100, Rows: 30},
 		Detach{},
 		Shutdown{},
+		InfoRequest{},
 		ActionFocus{X: 5, Y: 7},
 		ActionSelectWindow{Index: 3},
 		ActionNewWindow{},
@@ -44,6 +45,8 @@ func TestRoundTrip(t *testing.T) {
 		Notice{Text: "hello"},
 		Clipboard{Text: "copied text\nsecond line"},
 		Goodbye{Reason: "detached"},
+		SessionInfo{Name: "work", Windows: 2, Panes: 3, Clients: 1, CreatedAt: 1700000000, Version: "v0.2.0", PID: 4242},
+		SwitchSession{Name: "work", Create: true},
 	}
 
 	for i, want := range msgs {

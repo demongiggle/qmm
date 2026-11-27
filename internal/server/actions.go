@@ -75,6 +75,16 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
+	// While the session menu is open, mouse/action messages dismiss the
+	// overlay instead of changing panes or windows underneath it.
+	if c.sessionsOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane, sessionListResult:
+		default:
+			s.closeSessionsMenu(c)
+			return false
+		}
+	}
 	// While the settings page is open, mouse/action messages dismiss the
 	// overlay instead of changing panes or windows underneath it.
 	if c.settingsOpen {
@@ -175,6 +185,8 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 				_ = p.cmd.Process.Kill()
 			}
 		}
+	case sessionListResult:
+		s.handleSessionListResult(c, msg)
 	}
 	return s.shutdownRequested
 }
@@ -194,6 +206,26 @@ func (s *Server) detachClient(c *clientConn, reason string) {
 	// Queue Goodbye behind any already-pending frames, then close shortly
 	// after to give the writer a chance to flush it.
 	c.enqueue(protocol.Goodbye{Reason: reason})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = c.conn.Close()
+		close(c.done)
+	}()
+	if s.recomputeSize() {
+		s.relayout()
+		s.needFull = true
+	}
+	s.broadcast()
+}
+
+// switchClientSession instructs c to disconnect and attach to (or create)
+// targetName, leaving this session running untouched.
+func (s *Server) switchClientSession(c *clientConn, targetName string, create bool) {
+	if _, ok := s.clients[c]; !ok {
+		return
+	}
+	delete(s.clients, c)
+	c.enqueue(protocol.SwitchSession{Name: targetName, Create: create})
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		_ = c.conn.Close()
@@ -467,6 +499,8 @@ var prefixBindings = []prefixBinding{
 	prefixBind("]", func(s *Server, c *clientConn) { s.pasteClipboard(c) }),
 	// Categorized, scrollable session settings.
 	prefixBind("s", func(s *Server, c *clientConn) { s.openSettings(c) }),
+	// Multi-session switcher and creator (Shift-S pairs with lowercase s).
+	prefixBind("S", func(s *Server, c *clientConn) { s.openSessionsMenu(c) }),
 	prefixBind("z", func(s *Server, c *clientConn) { s.toggleZoom() }),
 	prefixBind("d", func(s *Server, c *clientConn) { s.detachClient(c, "detached") }),
 	prefixBind("?", func(s *Server, c *clientConn) { s.toggleHelp(c) }),
@@ -520,6 +554,11 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 	if c.confirmOpen {
 		c.clearRepeat()
 		s.handleShutdownConfirmInput(c, data)
+		return
+	}
+	if c.sessionsOpen {
+		c.clearRepeat()
+		s.handleSessionsMenuInput(c, data)
 		return
 	}
 	if c.settingsOpen {

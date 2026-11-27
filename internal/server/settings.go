@@ -500,6 +500,8 @@ func (s *Server) openSettings(c *clientConn) {
 	c.helpOpen = false
 	c.helpTop = 0
 	c.confirmOpen = false
+	c.sessionsOpen = false
+	c.sessionsNaming = false
 	c.displayPanesOpen = false
 	c.displayPanesInput = ""
 	c.displayPanesDeadline = time.Time{}

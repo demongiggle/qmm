@@ -65,6 +65,8 @@ func (s *Server) openDisplayPanes(c *clientConn) {
 	c.helpTop = 0
 	c.confirmOpen = false
 	c.settingsOpen = false
+	c.sessionsOpen = false
+	c.sessionsNaming = false
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()

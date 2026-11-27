@@ -45,8 +45,9 @@ type window struct {
 	name       string
 }
 
-// session is the single qmm session: a set of windows.
+// session is one qmm session: a named set of windows.
 type session struct {
+	name       string
 	windows    map[int]*window
 	active     int
 	nextPaneID int
@@ -58,6 +59,13 @@ type session struct {
 	// onOutput is called after a pane produces output; used to schedule a
 	// re-render. May be nil in tests.
 	onOutput func()
+}
+
+func (s *session) sessionName() string {
+	if s != nil && s.name != "" {
+		return s.name
+	}
+	return "default"
 }
 
 func newSession() *session {
@@ -143,7 +151,7 @@ func (s *session) spawnPane(dir string, cols, rows int) (*pane, error) {
 	// Be explicit: the child gets its own session and controlling tty so a
 	// process-group kill aimed at a pane can never hit our own group.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "QMM_SESSION="+s.sessionName())
 	if dir != "" {
 		if st, err := os.Stat(dir); err == nil && st.IsDir() {
 			cmd.Dir = dir

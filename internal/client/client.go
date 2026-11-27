@@ -28,13 +28,28 @@ func debugLog(format string, args ...interface{}) {
 	fmt.Fprintf(f, format+"\n", args...)
 }
 
+// SwitchRequest is returned by AttachWithSwitch when the server instructs the
+// client to disconnect and switch to another session (or create a new one).
+type SwitchRequest struct {
+	Name   string
+	Create bool
+}
+
 // Attach connects to the qmm server at socketPath, renders its screen and
 // blocks until the user detaches, the session ends, or the connection breaks.
 // The terminal is restored before returning.
 func Attach(socketPath string) error {
+	_, err := AttachWithSwitch(socketPath)
+	return err
+}
+
+// AttachWithSwitch behaves like Attach, returning a non-nil SwitchRequest
+// instead of exiting when the user picks or creates another session from the
+// in-app session menu.
+func AttachWithSwitch(socketPath string) (*SwitchRequest, error) {
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
-		return fmt.Errorf("qmm: cannot reach server at %s (%w) — is a qmm session running?", socketPath, err)
+		return nil, fmt.Errorf("qmm: cannot reach server at %s (%w) — is a qmm session running?", socketPath, err)
 	}
 	defer conn.Close()
 
@@ -42,10 +57,10 @@ func Attach(socketPath string) error {
 
 	screen, err := newScreen()
 	if err != nil {
-		return fmt.Errorf("qmm: init screen: %w", err)
+		return nil, fmt.Errorf("qmm: init screen: %w", err)
 	}
 	if err := screen.Init(); err != nil {
-		return fmt.Errorf("qmm: init screen: %w", err)
+		return nil, fmt.Errorf("qmm: init screen: %w", err)
 	}
 	screen.EnableMouse()
 	// Hide the host cursor until the first frame supplies a pane cursor
@@ -62,18 +77,18 @@ func Attach(socketPath string) error {
 	// Handshake.
 	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := codec.Send(protocol.Hello{Term: os.Getenv("TERM"), Cols: cols, Rows: rows}); err != nil {
-		return fmt.Errorf("qmm: handshake: %w", err)
+		return nil, fmt.Errorf("qmm: handshake: %w", err)
 	}
 	_ = conn.SetWriteDeadline(time.Time{})
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	msg, err := codec.Recv()
 	_ = conn.SetReadDeadline(time.Time{})
 	if err != nil {
-		return fmt.Errorf("qmm: handshake: %w", err)
+		return nil, fmt.Errorf("qmm: handshake: %w", err)
 	}
 	welcome, ok := msg.(protocol.Welcome)
 	if !ok {
-		return fmt.Errorf("qmm: unexpected handshake reply from server")
+		return nil, fmt.Errorf("qmm: unexpected handshake reply from server")
 	}
 
 	msgs := make(chan interface{}, 64)
@@ -113,7 +128,8 @@ func Attach(socketPath string) error {
 	defer caretTicker.Stop()
 
 	reason := ""
-	for reason == "" {
+	var switchReq *SwitchRequest
+	for reason == "" && switchReq == nil {
 		select {
 		case m, ok := <-msgs:
 			if !ok {
@@ -138,6 +154,8 @@ func Attach(socketPath string) error {
 				_ = screen.writeClipboard(m.Text)
 			case protocol.Goodbye:
 				reason = m.Reason
+			case protocol.SwitchSession:
+				switchReq = &SwitchRequest{Name: m.Name, Create: m.Create}
 			}
 		case <-caretTicker.C:
 			if c.blinkCaret() {
@@ -162,8 +180,11 @@ func Attach(socketPath string) error {
 		}
 	}
 
+	if switchReq != nil {
+		return switchReq, nil
+	}
 	if reason != "" {
 		fmt.Fprintf(os.Stderr, "qmm: %s\n", reason)
 	}
-	return nil
+	return nil, nil
 }

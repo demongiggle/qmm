@@ -233,7 +233,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 			t.Fatalf("status bar FG = %d, want Navy %d", got, statusBarColors[navy].fg)
 		}
 		// The active tab keeps the border color, whatever the bar color is.
-		if got := cellAt(f, 0, 23); got.BG != accentColorCodes[0] || got.FG != colBarActiveFG {
+		if got := cellAt(f, f.Tabs[0].Start, 23); got.BG != accentColorCodes[0] || got.FG != colBarActiveFG {
 			t.Fatalf("active tab colors = %d/%d, want %d/%d", got.FG, got.BG, colBarActiveFG, accentColorCodes[0])
 		}
 	})
@@ -245,7 +245,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 		if got := cellAt(f, 40, 5).FG; got != 39 {
 			t.Fatalf("active border FG = %d, want cyan 39", got)
 		}
-		if got := cellAt(f, 0, 23).BG; got != 39 {
+		if got := cellAt(f, f.Tabs[0].Start, 23).BG; got != 39 {
 			t.Fatalf("active tab BG = %d, want cyan 39", got)
 		}
 	})
