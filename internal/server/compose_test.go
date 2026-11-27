@@ -338,22 +338,149 @@ func TestComposeWideGlyphScrollKeepsBackground(t *testing.T) {
 	p := s.panes[1]
 	comp := &compositor{}
 
-	// Two CJK lines, then the vim scroll sequence: the DECSTBM line scroll
-	// relies on BCE to keep BG 235 in the freshly exposed row, including the
-	// trailing half-cells of wide runes in the row above.
-	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J日本語\r\n中文\r\n\x1b[3;1H")); err != nil {
+	// Initial full-screen draw with Normal background 235, then a real vim
+	// DECSTBM line scroll: the freshly exposed row must keep BG 235, and the
+	// scrolled CJK row above must keep its background on both halves of every
+	// double-width rune.
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J日本語\r\n中文行")); err != nil {
 		t.Fatalf("write wide screen: %v", err)
+	}
+	if _, err := p.vt.Write([]byte("\x1b[1;22r\x1b[22;1H\r\n\x1b[1;23r\x1b[22;1H新行")); err != nil {
+		t.Fatalf("write vim scroll: %v", err)
 	}
 	f := comp.compose(s, 80, 24, true)
 
-	// Rows 0 and 1 must be free of default-background cells: both halves of
-	// the wide runes and everything scrolled past them keep BG 235.
-	for _, y := range []int{0, 1} {
+	// The scroll shifts 中 文 行 onto row 0, and the freshly exposed bottom
+	// row 21 holds 新行 with BG 235 on the runes, their half cells, and the
+	// trailing blanks.
+	want := map[[2]int]rune{{0, 0}: '中', {2, 0}: '文', {4, 0}: '行', {0, 21}: '新', {2, 21}: '行'}
+	for pos, ch := range want {
+		if got := cellAt(f, pos[0], pos[1]); got.Ch != ch {
+			t.Errorf("cell (%d,%d) = %q, want %q", pos[0], pos[1], got.Ch, ch)
+		}
+	}
+	for _, y := range []int{0, 21} {
 		for x := 0; x < 39; x++ {
 			c := cellAt(f, x, y)
 			if c.BG == protocol.ColorDefault && c.Ch == ' ' {
 				t.Errorf("cell (%d,%d) is a blank default-BG gap", x, y)
 			}
 		}
+	}
+}
+
+// TestComposeWideGlyphRightEdgeClip keeps a double-width rune that straddles
+// the pane's right edge from leaving a default-background gap behind.
+func TestComposeWideGlyphRightEdgeClip(t *testing.T) {
+	s := &session{
+		windows:    map[int]*window{},
+		panes:      map[int]*pane{},
+		nextPaneID: 3,
+		settings:   defaultSettings(),
+	}
+	tree := layout.New(1)
+	tree.Split(1, 2, layout.Vertical)
+	s.windows[0] = &window{index: 0, tree: tree, activePane: 1, name: "zsh"}
+	s.active = 0
+	// 40-column panes so the vt width and the pane rect agree: pane 1 covers
+	// columns 0..39.
+	s.panes[1] = &pane{id: 1, vt: vt10x.New(vt10x.WithSize(40, 23))}
+	s.panes[2] = &pane{id: 2, vt: vt10x.New(vt10x.WithSize(40, 23))}
+	comp := &compositor{}
+
+	// 19 double-width runes fill columns 0..37, one space sits at 38, and a
+	// 20th double-width rune straddles column 39.
+	var row []rune
+	for i := 0; i < 19; i++ {
+		row = append(row, '日')
+	}
+	row = append(row, ' ')
+	row = append(row, '語')
+	if _, err := s.panes[1].vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J" + string(row))); err != nil {
+		t.Fatalf("write clipped row: %v", err)
+	}
+	f := comp.compose(s, 80, 24, true)
+
+	if got := cellAt(f, 39, 0); got.BG != 235 || got.Ch != ' ' {
+		t.Errorf("clipped column (39,0) = %+v, want blank with BG 235", got)
+	}
+	// The caret expands past the clip too; it must clamp to the pane edge.
+	if f.CursorX != 39 || f.CursorY != 0 {
+		t.Errorf("cursor at (%d,%d), want clamped to (39,0)", f.CursorX, f.CursorY)
+	}
+}
+
+// TestComposeWideGlyphCaretStaysInsidePane keeps an over-expanding caret from
+// landing on a border or a neighbor pane.
+func TestComposeWideGlyphCaretStaysInsidePane(t *testing.T) {
+	s := newTestSession()
+	p := s.panes[1]
+	comp := &compositor{}
+
+	// 21 double-width runes in a 39-column vt expand past the 40-column pane
+	// rect; the caret must clamp instead of landing in the neighbor pane.
+	var row []rune
+	for i := 0; i < 21; i++ {
+		row = append(row, '日')
+	}
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[H\x1b[2J" + string(row))); err != nil {
+		t.Fatal(err)
+	}
+	f := comp.compose(s, 80, 24, true)
+	if f.CursorX > 39 {
+		t.Errorf("cursor at %d, want inside the pane (<= 39)", f.CursorX)
+	}
+}
+
+// TestSnapshotLineLayout keeps selection and copy-mode snapshots in the same
+// terminal-column layout as the live pane: no dropped runes, consistent
+// selection columns, and text that survives round-tripping.
+func TestSnapshotLineLayout(t *testing.T) {
+	// Building the snapshot through vtSnapshot exercises the column-space
+	// expansion; the recorder uses the same space.
+	p := &pane{vt: vt10x.New(vt10x.WithSize(39, 23))}
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J日本語 A行")); err != nil {
+		t.Fatal(err)
+	}
+	lines, curX, _ := p.vtSnapshot()
+	row := lines[0]
+
+	// The whole rendered layout: 日本語 fills columns 0..5, space at 6,
+	// A at 7, 行 at 8..9. Placeholders carry Ch 0 and the rune's colors.
+	want := map[int]rune{0: '日', 2: '本', 4: '語', 6: ' ', 7: 'A', 8: '行'}
+	for x, ch := range want {
+		if got := row.cells[x]; got.Ch != ch {
+			t.Errorf("snapshot cell %d = %q, want %q", x, got.Ch, ch)
+		}
+	}
+	for _, x := range []int{1, 3, 5, 9} {
+		c := row.cells[x]
+		if c.Ch != 0 || c.BG != 235 {
+			t.Errorf("snapshot half cell %d = %+v, want placeholder with BG 235", x, c)
+		}
+	}
+	// The expanded caret column matches the live pane's rendered caret.
+	if curX != 10 {
+		t.Errorf("snapshot caret at %d, want 10", curX)
+	}
+
+	// A straight blit puts the line on screen columns unchanged.
+	set := map[[2]int]rune{}
+	draw := func(x, y int, ch rune, fg, bg int32, st uint8) {
+		set[[2]int{x, y}] = ch
+	}
+	blitSnapshotLine(draw, row, 10, 0, 20, nil)
+	for x, ch := range want {
+		if got := set[[2]int{10 + x, 0}]; got != ch {
+			t.Errorf("snapshotted cell at screen col %d = %q, want %q", 10+x, got, ch)
+		}
+	}
+	if got, ok := set[[2]int{11, 0}]; !ok || got != ' ' {
+		t.Errorf("snapshot half cell drawn at screen col 11 = %+v", set)
+	}
+
+	// Copy text skips placeholders: the full line round-trips.
+	if got := row.text(); got != "日本語 A行" {
+		t.Errorf("copy text = %q, want %q", got, "日本語 A行")
 	}
 }

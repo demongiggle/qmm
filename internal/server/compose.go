@@ -195,7 +195,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			}
 			if id == w.activePane && !w.zoomed {
 				cur := p.vtCursor()
-				frame.CursorX, frame.CursorY = r.X+cur.x, r.Y+cur.y
+				frame.CursorX, frame.CursorY = r.X+clampInt(cur.x, 0, r.W-1), r.Y+cur.y
 				// A frozen snapshot has no live caret, and a copy view
 				// replaces the pane's cells with scrollback.
 				frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(id)
@@ -271,7 +271,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 						blitPane(setCell, p, inner)
 					}
 					cur := p.vtCursor()
-					frame.CursorX, frame.CursorY = inner.X+cur.x, inner.Y+cur.y
+					frame.CursorX, frame.CursorY = inner.X+clampInt(cur.x, 0, inner.W-1), inner.Y+cur.y
 					// A frozen snapshot has no live caret, and a copy view
 					// replaces the pane's cells with scrollback.
 					frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(w.activePane)
@@ -431,16 +431,7 @@ func (p *pane) vtCursor() vtCursor {
 	// blitPane expands double-width runes into two columns, so the caret
 	// column must go through the same expansion or it lands on the wrong
 	// cell whenever the row contains wide characters.
-	cols, _ := p.vt.Size()
-	x := 0
-	for i := 0; i < cur.X && i < cols; i++ {
-		ch := p.vt.Cell(i, cur.Y).Char
-		if ch == 0 {
-			ch = ' '
-		}
-		x += vtRuneWidth(ch)
-	}
-	return vtCursor{x: x, y: cur.Y, visible: vis}
+	return vtCursor{x: renderedCursorColumn(p.vt, cur.X, cur.Y), y: cur.Y, visible: vis}
 }
 
 // vtColor translates a vt10x color into the protocol's color encoding.
@@ -495,7 +486,10 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 			w := vtRuneWidth(ch)
 			if rx+w > r.W {
 				// The rune does not fit in the pane's final column, so the
-				// rest of the row is clipped at the right edge.
+				// rest of the row is clipped at the right edge. Keep the
+				// leftover column in the glyph's colors rather than letting a
+				// default-background cell stay behind.
+				setCell(r.X+rx, r.Y+y, ' ', fg, bg, st)
 				break
 			}
 			setCell(r.X+rx, r.Y+y, ch, fg, bg, st)

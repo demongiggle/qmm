@@ -6,8 +6,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/rivo/uniseg"
-
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
 )
@@ -840,10 +838,13 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 // ---------------------------------------------------------------------------
 
 // blitSnapshotLine writes one scrollback line into a screen row starting at
-// column x0. hl may be nil; when it reports a hit, the cell is drawn with the
-// returned style (copy mode uses this for the selection and cursor).
+// column x0. Scrollback lines live in terminal columns: a double-width rune
+// owns two cells and a zero-rune placeholder marks its blank second half, so
+// buffer columns map 1:1 onto screen columns and the pane caret, mouse
+// coordinates, and selection columns all agree. hl may be nil; when it reports
+// a hit for a column, the cell is drawn with the returned style (copy mode
+// uses this for the selection and cursor).
 func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl func(col int) (fg, bg int32, style uint8, ok bool)) {
-	skip := 0
 	for x := 0; x < width; x++ {
 		cell := blankCopyCell()
 		if x < len(line.cells) {
@@ -853,18 +854,11 @@ func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl f
 		if ch == 0 {
 			ch = ' '
 		}
-		if skip > 0 {
-			ch = ' '
-			skip--
-		}
 		fg, bg, style := cell.FG, cell.BG, cell.Style
 		if hl != nil {
 			if hfg, hbg, hstyle, ok := hl(x); ok {
 				fg, bg, style = hfg, hbg, hstyle
 			}
-		}
-		if skip == 0 && uniseg.StringWidth(string(ch)) == 2 {
-			skip = 1
 		}
 		setCell(x0+x, y, ch, fg, bg, style)
 	}

@@ -328,6 +328,10 @@ func resizePane(p *pane, cols, rows int) {
 }
 
 // vtSnapshot copies the pane's current vt10x screen and cursor position.
+// Lines are expressed in terminal columns, the same space the scrollback
+// recorder uses: a double-width rune owns two cells and a zero-rune
+// placeholder marks its second half. The whole copy buffer then shares one
+// coordinate system, so a screen column maps 1:1 onto a buffer column.
 func (p *pane) vtSnapshot() ([]copyLine, int, int) {
 	p.vt.Lock()
 	defer p.vt.Unlock()
@@ -335,8 +339,12 @@ func (p *pane) vtSnapshot() ([]copyLine, int, int) {
 	cur := p.vt.Cursor()
 	out := make([]copyLine, rows)
 	for y := 0; y < rows; y++ {
-		line := make([]copyCell, cols)
-		for x := 0; x < cols; x++ {
+		cells := make([]copyCell, cols)
+		for i := range cells {
+			cells[i] = blankCopyCell()
+		}
+		cx := 0
+		for x := 0; x < cols && cx < cols; x++ {
 			g := p.vt.Cell(x, y)
 			ch := g.Char
 			if ch == 0 {
@@ -358,11 +366,44 @@ func (p *pane) vtSnapshot() ([]copyLine, int, int) {
 			if g.Mode&gttrReverse != 0 {
 				st |= protocol.StyleReverse
 			}
-			line[x] = copyCell{Ch: ch, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
+			// A rune whose second half falls past the right edge is clipped
+			// to a plain cell, like a terminal would clip it.
+			w := vtRuneWidth(ch)
+			if cx+w > cols {
+				w = cols - cx
+				ch = ' '
+			}
+			cells[cx] = copyCell{Ch: ch, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
+			for k := 1; k < w; k++ {
+				// Placeholder: copyLine.text skips it, and the line renderer
+				// paints it as the wide rune's blank second half.
+				cells[cx+k] = copyCell{Ch: 0, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
+			}
+			cx += w
 		}
-		out[y] = copyLine{cells: line}
+		out[y] = copyLine{cells: cells}
 	}
-	return out, cur.X, cur.Y
+	return out, renderedCursorColumn(p.vt, cur.X, cur.Y), cur.Y
+}
+
+// renderedCursorColumn maps a vt10x cursor column onto the terminal-column
+// layout the copy buffer and the pane renderer use. vt10x advances one cell
+// per rune, so the caret must be expanded by the widths of the runes before
+// it. Callers must hold the vt lock.
+func renderedCursorColumn(vt vt10x.Terminal, col, row int) int {
+	cols, rows := vt.Size()
+	if row < 0 || row >= rows {
+		return col
+	}
+	x := 0
+	for i := 0; i < col && i < cols; i++ {
+		ch := vt.Cell(i, row).Char
+		if ch == 0 {
+			ch = ' '
+		}
+		x += vtRuneWidth(ch)
+	}
+	return clampInt(x, 0, cols-1)
 }
 
 // copyBuffer returns scrollback plus the live screen, oldest line first.

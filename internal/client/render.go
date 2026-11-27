@@ -186,9 +186,11 @@ func (a *attach) paintCell(x, y int) {
 }
 
 // drawSteadyCell redraws the caret cell without its text-blink attribute,
-// including the trailing cell for double-width runes. The grid keeps the
-// original style; only the screen copy is steadied while the native cursor
-// is visible.
+// including the trailing cell for double-width runes. The server emits the
+// same style on both halves of a wide rune, so the second half must be
+// steadied too or the blinking resumes right next to the steady caret. The
+// grid keeps the original style; only the screen copy is steadied while the
+// native cursor is visible.
 func (a *attach) drawSteadyCell(x, y int) {
 	if !a.inGrid(x, y) {
 		return
@@ -200,6 +202,7 @@ func (a *attach) drawSteadyCell(x, y int) {
 	if wideCell(c.Ch) && x+1 < a.gridCols {
 		next := a.grid[y*a.gridCols+x+1]
 		next.Row, next.Col = y, x+1
+		next.Style &^= protocol.StyleBlink
 		a.setScreenCell(next)
 	}
 }
