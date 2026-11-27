@@ -309,6 +309,11 @@ func startAndAttach(name string) error {
 	if err != nil {
 		return err
 	}
+	// Check before spawning: a stale QMM_SESSION marker would otherwise start a
+	// daemon and only then refuse to attach, leaving an orphan session behind.
+	if err := nestedAttachError(sock); err != nil {
+		return err
+	}
 	if !dialable(sock) {
 		if err := spawnServer(name, sock); err != nil {
 			return err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -103,6 +104,26 @@ func TestNestedAttachError(t *testing.T) {
 				t.Fatalf("nestedAttachError(%q) = %v, want nil", tc.sock, err)
 			}
 		})
+	}
+}
+
+func TestStartAndAttachRefusesNestedBeforeSpawning(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("QMM_SOCKET_DIR", dir)
+	t.Setenv("QMM_SESSION", "dev")
+	t.Setenv("QMM_ALLOW_NESTED", "")
+
+	err := startAndAttach("dev")
+	if err == nil || !strings.Contains(err.Error(), `"dev"`) {
+		t.Fatalf("startAndAttach = %v, want a nested-attach refusal", err)
+	}
+	// The refusal must happen before spawnServer: no socket, log, or lock file.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("socket dir has %d entries after the refusal, want 0", len(entries))
 	}
 }
 
