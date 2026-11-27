@@ -253,9 +253,9 @@ func (c *compositor) drawSelection(setCell helpSetCell, st *selectionState, r la
 		}
 		blitSnapshotLine(setCell, line, r.X, r.Y+y, r.W, func(col int) (int32, int32, uint8, bool) {
 			if st.inSelection(idx, col) {
-				return colCopySelectionFG, colCopySelectionBG, 0, true
+				return c.chrome.copySelFG, c.chrome.copySelBG, 0, true
 			}
 			return 0, 0, 0, false
-		})
+		}, c.chrome.mapColor)
 	}
 }

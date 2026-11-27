@@ -378,22 +378,22 @@ func (c *compositor) drawSessionsMenu(frame *protocol.Frame, setCell helpSetCell
 
 	for y := 0; y < max(0, rows-statusRows); y++ {
 		for x := 0; x < cols; x++ {
-			setCell(x, y, ' ', colHelpMuted, colHelpBackdrop, 0)
+			setCell(x, y, ' ', c.chrome.help.muted, c.chrome.help.backdrop, 0)
 		}
 	}
 
 	x0, y0, x1, y1 := helpBox(cols, rows)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			setCell(x, y, ' ', colHelpFG, colHelpPanelBG, 0)
+			setCell(x, y, ' ', c.chrome.help.fg, c.chrome.help.panelBG, 0)
 		}
 	}
-	drawHelpFrame(setCell, x0, y0, x1, y1)
+	drawHelpFrame(setCell, x0, y0, x1, y1, c.chrome.help)
 
 	titleWidth := max(0, x1-x0-3)
 	title := fmt.Sprintf(" QMM SESSIONS · CURRENT: %s ", currentName)
-	putHelpText(setCell, x0+2, y0, titleWidth, fitHelpText(title, titleWidth), colHelpTitle, colHelpPanelBG, protocol.StyleBold)
-	putHelpText(setCell, x0+2, y1, titleWidth, fitHelpText(sessionsMenuFooter(view, c.sessionsLoading, c.sessionsNaming), titleWidth), colHelpMuted, colHelpPanelBG, 0)
+	putHelpText(setCell, x0+2, y0, titleWidth, fitHelpText(title, titleWidth), c.chrome.help.title, c.chrome.help.panelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y1, titleWidth, fitHelpText(sessionsMenuFooter(view, c.sessionsLoading, c.sessionsNaming), titleWidth), c.chrome.help.muted, c.chrome.help.panelBG, 0)
 
 	innerX := x0 + 2
 	innerRight := x1 - 2
@@ -406,7 +406,7 @@ func (c *compositor) drawSessionsMenu(frame *protocol.Frame, setCell helpSetCell
 			top:         view.top,
 			maxTop:      view.maxTop,
 			lineCount:   view.lineCount,
-		})
+		}, c.chrome.help)
 	}
 
 	nextAuto := sessions.NextName(c.sessionsList)
@@ -415,11 +415,11 @@ func (c *compositor) drawSessionsMenu(frame *protocol.Frame, setCell helpSetCell
 		if idx >= len(view.lines) {
 			break
 		}
-		drawSessionsMenuLine(setCell, innerX, y0+1+i, width, view.lines[idx], view.cursor, currentName, c.sessionsNaming, c.sessionsInput, nextAuto, opts)
+		c.drawSessionsMenuLine(setCell, innerX, y0+1+i, width, view.lines[idx], view.cursor, currentName, c.sessionsNaming, c.sessionsInput, nextAuto, opts)
 	}
 }
 
-func drawSessionsMenuLine(
+func (c *compositor) drawSessionsMenuLine(
 	setCell helpSetCell,
 	x, y, width int,
 	line sessionsMenuLine,
@@ -434,21 +434,21 @@ func drawSessionsMenuLine(
 		return
 	}
 	if line.header != "" {
-		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", colHelpHeader, colHelpPanelBG, protocol.StyleBold)
+		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", c.chrome.help.header, c.chrome.help.panelBG, protocol.StyleBold)
 		for i := used + 1; i < width; i++ {
-			setCell(x+i, y, '─', colHelpMuted, colHelpPanelBG, 0)
+			setCell(x+i, y, '─', c.chrome.help.muted, c.chrome.help.panelBG, 0)
 		}
 		return
 	}
 	if line.isErr {
-		putHelpText(setCell, x+2, y, max(1, width-2), fitHelpText("Error: "+line.errText, max(1, width-2)), colTooSmall, colHelpPanelBG, protocol.StyleBold)
+		putHelpText(setCell, x+2, y, max(1, width-2), fitHelpText("Error: "+line.errText, max(1, width-2)), c.chrome.tooSmall, c.chrome.help.panelBG, protocol.StyleBold)
 		return
 	}
 
 	selected := line.itemIdx == cursor
-	fg, bg := int32(colHelpFG), int32(colHelpPanelBG)
+	fg, bg := c.chrome.help.fg, c.chrome.help.panelBG
 	if selected {
-		fg, bg = colSettingsSelectedFG, colSettingsSelectedBG
+		fg, bg = c.chrome.settingsFG, c.chrome.settingsBG
 	}
 	for i := 0; i < width; i++ {
 		setCell(x+i, y, ' ', fg, bg, 0)
@@ -467,10 +467,10 @@ func drawSessionsMenuLine(
 			if input == "" {
 				prompt = fmt.Sprintf("New session: █ (Enter: auto %q)", nextAuto)
 			}
-			putHelpText(setCell, x+1, y, max(1, width-2), fitHelpText(prefix+prompt, max(1, width-2)), colHelpTitle, bg, protocol.StyleBold)
+			putHelpText(setCell, x+1, y, max(1, width-2), fitHelpText(prefix+prompt, max(1, width-2)), c.chrome.help.title, bg, protocol.StyleBold)
 			return
 		}
-		putHelpText(setCell, x+1, y, max(1, width-2), fitHelpText(prefix+"+ New session", max(1, width-2)), colHelpTitle, bg, style)
+		putHelpText(setCell, x+1, y, max(1, width-2), fitHelpText(prefix+"+ New session", max(1, width-2)), c.chrome.help.title, bg, style)
 		return
 	}
 
@@ -508,7 +508,7 @@ func drawSessionsMenuLine(
 	if badge != "" {
 		bw := uniseg.StringWidth(badge)
 		rx -= bw
-		bfg, bbg := int32(colBarActiveFG), opts.borderColor()
+		bfg, bbg := c.chrome.activeFG, opts.borderColor()
 		for i := 0; i < bw; i++ {
 			setCell(rx+i, y, ' ', bfg, bbg, protocol.StyleBold)
 		}
@@ -519,7 +519,7 @@ func drawSessionsMenuLine(
 		mw := uniseg.StringWidth(meta)
 		rx -= mw
 		if rx > x+1 {
-			putHelpText(setCell, rx, y, mw, meta, colHelpMuted, bg, 0)
+			putHelpText(setCell, rx, y, mw, meta, c.chrome.help.muted, bg, 0)
 		}
 	}
 }

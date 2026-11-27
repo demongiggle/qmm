@@ -51,9 +51,9 @@ func TestSettingsPageViaPrefix(t *testing.T) {
 		return f.Full && strings.Contains(text, "QMM SETTINGS") && strings.Contains(text, "Appearance")
 	})
 
-	// Move to "Active pane border" and cycle Green -> Cyan. The status-bar
-	// rows come first, so it is two rows down from the top.
-	for _, seq := range []string{"\x1b[B", "\x1b[B", "\x1b[C"} {
+	// Move to "Active pane border" and cycle Theme -> Green -> Cyan. The theme
+	// row precedes the appearance rows, so it is three rows down from the top.
+	for _, seq := range []string{"\x1b[B", "\x1b[B", "\x1b[B", "\x1b[C", "\x1b[C"} {
 		if err := c.codec.Send(protocol.Input{Data: []byte(seq)}); err != nil {
 			t.Fatalf("settings key %q: %v", seq, err)
 		}

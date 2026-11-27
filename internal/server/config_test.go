@@ -46,7 +46,7 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 		t.Fatalf("read default config: %v", err)
 	}
 	for _, key := range []string{
-		"status_bar_clock", "status_bar_color", "active_pane_border", "cursor_shape", "cursor_blink",
+		"theme", "status_bar_clock", "status_bar_color", "active_pane_border", "cursor_shape", "cursor_blink",
 		"pane_number_timeout", "double_click_zoom", "keyboard_resize_step",
 		"automatic_window_names", "confirm_shutdown", "status_line_color", "copy_key",
 	} {
@@ -57,10 +57,10 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 
 	st.setByID(settingCursorShape, 2)
 	st.setByID(settingCursorBlink, 0)
-	st.setByID(settingBorderColor, accentColorIndex(t, "Pink"))
-	st.setByID(settingCopyKey, 1)                                    // Ctrl-Shift-X, away from the Ctrl-Y default
-	st.setByID(settingCopyStatusColor, statusColorIndex(t, "Green")) // away from the Blue default
-	st.setByID(settingStatusBarColor, statusColorIndex(t, "Navy"))
+	st.setByID(settingBorderColor, accentSettingIndex(t, "Pink"))
+	st.setByID(settingCopyKey, 1)                                      // Ctrl-Shift-X, away from the Ctrl-Y default
+	st.setByID(settingCopyStatusColor, statusSettingIndex(t, "Green")) // away from the Blue default
+	st.setByID(settingStatusBarColor, statusSettingIndex(t, "Navy"))
 	if err := writeConfig(path, &st); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

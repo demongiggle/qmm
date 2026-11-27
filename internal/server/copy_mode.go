@@ -847,7 +847,10 @@ func (s *Server) handleCopyModeInput(c *clientConn, data []byte) {
 // coordinates, and selection columns all agree. hl may be nil; when it reports
 // a hit for a column, the cell is drawn with the returned style (copy mode
 // uses this for the selection and cursor).
-func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl func(col int) (fg, bg int32, style uint8, ok bool)) {
+func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl func(col int) (fg, bg int32, style uint8, ok bool), mapColor func(int32, bool) int32) {
+	if mapColor == nil {
+		mapColor = func(c int32, _ bool) int32 { return c }
+	}
 	for x := 0; x < width; x++ {
 		cell := blankCopyCell()
 		if x < len(line.cells) {
@@ -857,7 +860,7 @@ func blitSnapshotLine(setCell helpSetCell, line copyLine, x0, y, width int, hl f
 		if ch == 0 {
 			ch = ' '
 		}
-		fg, bg, style := cell.FG, cell.BG, cell.Style
+		fg, bg, style := mapColor(cell.FG, true), mapColor(cell.BG, false), cell.Style
 		if hl != nil {
 			if hfg, hbg, hstyle, ok := hl(x); ok {
 				fg, bg, style = hfg, hbg, hstyle
@@ -889,13 +892,13 @@ func (c *compositor) drawCopyMode(setCell helpSetCell, st *copyModeState) {
 		}
 		blitSnapshotLine(setCell, line, r.X, r.Y+y, r.W, func(col int) (int32, int32, uint8, bool) {
 			if st.inSelection(idx, col) {
-				return colCopySelectionFG, colCopySelectionBG, 0, true
+				return c.chrome.copySelFG, c.chrome.copySelBG, 0, true
 			}
 			if idx == st.cursor.line && col == st.cursor.col {
-				return colCopyCursorFG, colCopyCursorBG, protocol.StyleBold, true
+				return c.chrome.copyCursorFG, c.chrome.copyCursorBG, protocol.StyleBold, true
 			}
 			return 0, 0, 0, false
-		})
+		}, c.chrome.mapColor)
 	}
 }
 

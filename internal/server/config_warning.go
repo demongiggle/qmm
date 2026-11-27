@@ -65,20 +65,20 @@ func (c *compositor) drawConfigWarning(frame *protocol.Frame, setCell helpSetCel
 
 	for y := 0; y < max(0, rows-statusRows); y++ {
 		for x := 0; x < cols; x++ {
-			setCell(x, y, ' ', colConfirmMuted, colConfirmBackdrop, 0)
+			setCell(x, y, ' ', c.chrome.help.muted, c.chrome.help.backdrop, 0)
 		}
 	}
 
 	x0, y0, x1, y1 := shutdownConfirmBox(cols, rows)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			setCell(x, y, ' ', colConfirmFG, colConfirmPanelBG, 0)
+			setCell(x, y, ' ', c.chrome.help.fg, c.chrome.help.panelBG, 0)
 		}
 	}
-	drawConfirmFrame(setCell, x0, y0, x1, y1)
+	drawConfirmFrame(setCell, x0, y0, x1, y1, c.chrome.help.panelBG, c.chrome.tooSmall)
 
 	titleWidth := max(0, x1-x0-3)
-	putHelpText(setCell, x0+2, y0, titleWidth, configWarningTitle, colTooSmall, colConfirmPanelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y0, titleWidth, configWarningTitle, c.chrome.tooSmall, c.chrome.help.panelBG, protocol.StyleBold)
 
 	width := max(0, x1-x0-3)
 	bodyY := y0 + 2
@@ -90,15 +90,15 @@ func (c *compositor) drawConfigWarning(frame *protocol.Frame, setCell helpSetCel
 		if y >= y1 {
 			break
 		}
-		fg, style := int32(colConfirmFG), uint8(0)
+		fg, style := c.chrome.help.fg, uint8(0)
 		switch i {
 		case 0:
-			fg, style = int32(colTooSmall), protocol.StyleBold
+			fg, style = c.chrome.tooSmall, protocol.StyleBold
 		case 1, 2:
-			fg = int32(colHelpKeyFG)
+			fg = c.chrome.help.keyFG
 		default:
-			fg = int32(colConfirmMuted)
+			fg = c.chrome.help.muted
 		}
-		putHelpText(setCell, x0+2, y, width, fitHelpText(line, width), fg, colConfirmPanelBG, style)
+		putHelpText(setCell, x0+2, y, width, fitHelpText(line, width), fg, c.chrome.help.panelBG, style)
 	}
 }

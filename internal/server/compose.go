@@ -55,6 +55,9 @@ type compositor struct {
 	last               []protocol.Cell
 	haveLast           bool
 
+	// chrome is the resolved theme palette for the frame being composed.
+	chrome chrome
+
 	helpOpen bool
 	helpTop  int
 
@@ -86,16 +89,18 @@ type compositor struct {
 	selection *selectionState
 }
 
-func blankCell(row, col int) protocol.Cell {
-	return protocol.Cell{Row: row, Col: col, Ch: ' ', FG: colDefault, BG: colDefault}
+func blankCell(row, col int, bg int32) protocol.Cell {
+	return protocol.Cell{Row: row, Col: col, Ch: ' ', FG: colDefault, BG: bg}
 }
 
 // compose renders the current session state into a frame. It is called from
 // the server's single event loop, so session state is stable while it runs.
 func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protocol.Frame {
+	opts := s.opts()
+	c.chrome = opts.chrome()
 	cells := make([]protocol.Cell, cols*rows)
 	for i := range cells {
-		cells[i] = blankCell(i/cols, i%cols)
+		cells[i] = blankCell(i/cols, i%cols, c.chrome.background)
 	}
 	setCell := func(x, y int, ch rune, fg, bg int32, style uint8) {
 		if x < 0 || y < 0 || x >= cols || y >= rows {
@@ -104,7 +109,6 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		cells[y*cols+x] = protocol.Cell{Row: y, Col: x, Ch: ch, FG: fg, BG: bg, Style: style}
 	}
 
-	opts := s.opts()
 	frame := protocol.Frame{
 		Cols:        cols,
 		Rows:        rows,
@@ -156,7 +160,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			start = 0
 		}
 		for i, r := range []rune(msg) {
-			setCell(start+i, rows/2, r, colTooSmall, colDefault, protocol.StyleBold)
+			setCell(start+i, rows/2, r, c.chrome.tooSmall, c.chrome.background, protocol.StyleBold)
 		}
 		frame.CursorVisible = false
 		if c.copyMode != nil && c.copyMode.open {
@@ -188,7 +192,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			if selected {
 				c.drawSelection(setCell, c.selection, r)
 			} else {
-				blitPane(setCell, p, r)
+				blitPane(setCell, p, r, c.chrome.mapColor)
 			}
 			if id == w.activePane {
 				activeRect, haveActive = r, true
@@ -236,11 +240,11 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				ch = '┼'
 			}
 			x, y := idx%cols, idx/cols
-			color := int32(colBorder)
+			color := c.chrome.border
 			if haveActive && borderTouchesRect(x, y, m, activeRect) {
 				color = activeColor
 			}
-			setCell(x, y, ch, color, colDefault, 0)
+			setCell(x, y, ch, color, c.chrome.background, 0)
 		}
 		if !w.zoomed {
 			for _, b := range borders {
@@ -259,7 +263,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				outer, inner := zoomRects(area.W, area.H)
 				for y := outer.Y; y < outer.Bottom(); y++ {
 					for x := outer.X; x < outer.Right(); x++ {
-						setCell(x, y, ' ', colDefault, colDefault, 0)
+						setCell(x, y, ' ', c.chrome.text, c.chrome.background, 0)
 					}
 				}
 				p := s.panes[w.activePane]
@@ -268,7 +272,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 					if selected {
 						c.drawSelection(setCell, c.selection, inner)
 					} else {
-						blitPane(setCell, p, inner)
+						blitPane(setCell, p, inner, c.chrome.mapColor)
 					}
 					cur := p.vtCursor()
 					frame.CursorX, frame.CursorY = inner.X+clampInt(cur.x, 0, inner.W-1), inner.Y+cur.y
@@ -283,12 +287,12 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				x0, y0 := outer.X, outer.Y
 				x1, y1 := outer.Right()-1, outer.Bottom()-1
 				for x := x0; x <= x1; x++ {
-					setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), activeColor, colDefault, 0)
-					setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), activeColor, colDefault, 0)
+					setCell(x, y0, boxChar(x, x0, x1, '┌', '─', '┐'), activeColor, c.chrome.background, 0)
+					setCell(x, y1, boxChar(x, x0, x1, '└', '─', '┘'), activeColor, c.chrome.background, 0)
 				}
 				for y := y0 + 1; y < y1; y++ {
-					setCell(x0, y, '│', activeColor, colDefault, 0)
-					setCell(x1, y, '│', activeColor, colDefault, 0)
+					setCell(x0, y, '│', activeColor, c.chrome.background, 0)
+					setCell(x1, y, '│', activeColor, c.chrome.background, 0)
 				}
 				frame.Panes = append(frame.Panes, protocol.PaneRect{
 					ID: w.activePane, Number: paneNumbers[w.activePane], X: outer.X, Y: outer.Y,
@@ -316,8 +320,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int, ch rune, fg, bg int32, style uint8), s *session, opts *settingsState, cols, rows int) {
 	sbY := rows - 1
 	showClock := opts.showClock()
-	activeColor := opts.borderColor()
-	bar := opts.statusBarStyle()
+	activeColor := c.chrome.activeBorder
+	bar := c.chrome.statusBar
 	for x := 0; x < cols; x++ {
 		setCell(x, sbY, ' ', bar.fg, bar.bg, 0)
 	}
@@ -360,7 +364,7 @@ func (c *compositor) drawStatusBar(frame *protocol.Frame, setCell func(x, y int,
 			fg, bg := bar.fg, bar.bg
 			var st uint8
 			if isActive {
-				fg, bg = colBarActiveFG, activeColor
+				fg, bg = c.chrome.activeFG, activeColor
 				st = protocol.StyleBold
 			}
 			setCell(col, sbY, r, fg, bg, st)
@@ -450,8 +454,12 @@ func vtColor(c vt10x.Color) int32 {
 	}
 }
 
-// blitPane copies the pane's virtual screen into the cell buffer.
-func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pane, r layout.Rect) {
+// blitPane copies the pane's virtual screen into the cell buffer. mapColor
+// applies the active theme to each foreground/background protocol color.
+func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pane, r layout.Rect, mapColor func(int32, bool) int32) {
+	if mapColor == nil {
+		mapColor = func(c int32, _ bool) int32 { return c }
+	}
 	p.vt.Lock()
 	cols, rows := p.vt.Size()
 	for y := 0; y < r.H && y < rows; y++ {
@@ -466,7 +474,7 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 			if ch == 0 {
 				ch = ' '
 			}
-			fg, bg := vtColor(g.FG), vtColor(g.BG)
+			fg, bg := mapColor(vtColor(g.FG), true), mapColor(vtColor(g.BG), false)
 			var st uint8
 			if g.Mode&gttrBold != 0 {
 				st |= protocol.StyleBold
