@@ -24,6 +24,14 @@ const (
 // server should shut down (confirmed prefix+&, qmm kill-server, or a
 // session-ending pane exit).
 func (s *Server) handleClientMessage(in clientMsg) bool {
+	// forceKillPane is an internal escalation from a timer, so it arrives
+	// without a client. Handle it before any per-client state: dereferencing
+	// the nil client used to panic the event loop two seconds after prefix+x
+	// and take every pane down with the server.
+	if msg, ok := in.msg.(forceKillPane); ok {
+		s.killPaneNow(msg.paneID)
+		return s.shutdownRequested
+	}
 	c := in.cli
 	// A mouse selection is not modal: only the messages that extend it (drag
 	// updates, wheel steps, and the input that may carry the copy key) keep it
@@ -179,13 +187,6 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		s.handleSelectStart(c, msg.X, msg.Y)
 	case protocol.ActionSelectUpdate:
 		s.handleSelectUpdate(c, msg.X, msg.Y)
-	case forceKillPane:
-		if p, ok := s.sess.panes[msg.paneID]; ok {
-			_ = p.ptmx.Close()
-			if p.cmd != nil && p.cmd.Process != nil {
-				_ = p.cmd.Process.Kill()
-			}
-		}
 	case sessionListResult:
 		s.handleSessionListResult(c, msg)
 	}
@@ -194,6 +195,22 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 
 // forceKillPane is an internal message used to escalate a kill after a timeout.
 type forceKillPane struct{ paneID int }
+
+// killPaneNow escalates a pane that ignored SIGHUP to SIGKILL. It runs in the
+// event loop; the pane may already have exited, in which case there is nothing
+// left to do.
+func (s *Server) killPaneNow(paneID int) {
+	p, ok := s.sess.panes[paneID]
+	if !ok {
+		return
+	}
+	if p.ptmx != nil {
+		_ = p.ptmx.Close()
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+}
 
 func (s *Server) contentRect() layout.Rect {
 	return layout.Rect{X: 0, Y: 0, W: s.cols, H: s.rows - statusRows}

@@ -285,3 +285,40 @@ func TestPrefixStateMachineEndsCtrlArrowRepeat(t *testing.T) {
 		})
 	}
 }
+
+func TestForceKillPaneWithoutClientKeepsOtherPanes(t *testing.T) {
+	s, _ := newHelpServer(80, 24)
+	dir := t.TempDir()
+	target, err := os.CreateTemp(dir, "target")
+	if err != nil {
+		t.Fatalf("temp target pty: %v", err)
+	}
+	other, err := os.CreateTemp(dir, "other")
+	if err != nil {
+		t.Fatalf("temp other pty: %v", err)
+	}
+	defer other.Close()
+	s.sess.panes[1].ptmx = target
+	s.sess.panes[2].ptmx = other
+
+	// The escalation timer for prefix+x sends forceKillPane with no client
+	// attached. It used to panic on the nil client and take the server down
+	// with every pane two seconds after the close.
+	if shutdown := s.handleClientMessage(clientMsg{msg: forceKillPane{paneID: 1}}); shutdown {
+		t.Fatal("forceKillPane requested shutdown")
+	}
+	if _, err := target.Write([]byte("x")); err == nil {
+		t.Fatal("target pane's pty is still open")
+	}
+	if _, err := other.Write([]byte("x")); err != nil {
+		t.Fatalf("unrelated pane's pty was closed: %v", err)
+	}
+	if _, ok := s.sess.panes[1]; !ok {
+		t.Fatal("forceKillPane removed the pane instead of waiting for its exit event")
+	}
+
+	// A late escalation for a pane that already exited is a harmless no-op.
+	if shutdown := s.handleClientMessage(clientMsg{msg: forceKillPane{paneID: 99}}); shutdown {
+		t.Fatal("stale forceKillPane requested shutdown")
+	}
+}
