@@ -226,27 +226,61 @@ to close it. The menu is local to the attached client.
 `Ctrl-r` to reload external config edits, or `q`, `Esc`, `Ctrl-c`, `s`, or
 `Ctrl-a` `s` to close.
 
-Tune twelve values: the status clock, status bar color, active border color,
-cursor shape (`Block`, `Underline`, or `Bar`), cursor blink, pane-number
-timeout, double-click zoom, keyboard resize step, automatic window names,
-shutdown confirmation, the copy status line color, and the copy-selection key.
-Both bars draw from the same eleven-color palette — **Slate**, **Blue**,
-**Navy**, **Teal**, **Green**, **Olive**, **Amber**, **Orange**, **Red**,
-**Purple**, and **Magenta** — so the session bar and the copy line can be told
-apart at a glance. The active border color comes from its own twelve-color
-accent palette — **Green**, **Cyan**, **Yellow**, **Magenta**, **Blue**,
-**Lime**, **Amber**, **Orange**, **Red**, **Pink**, **Purple**, and **White** —
-and paints both the active pane's border and its tab in the status bar. Some
-names appear in both palettes: a bar color is a dark background, an accent a
-bright highlight, and the settings page previews each choice on its value chip
-so the difference is visible before the page is closed. The default caret is a
-steady block; turn **Cursor blink** on for the 500 ms blink cycle.
-**Cursor shape** uses the host terminal's native DECSCUSR caret — steady block,
-underline, or bar — so the underlying pane text stays visible. qmm toggles that
-caret's visibility for blinking, keeping its rate independent of pane output
-and frame rate. Applications still control cursor visibility; their own
-DECSCUSR style requests are ignored. Terminals without DECSCUSR fall back to
-their default cursor shape.
+Tune thirteen values: a theme, the status clock, status bar color, active
+border color, cursor shape (`Block`, `Underline`, or `Bar`), cursor blink,
+pane-number timeout, double-click zoom, keyboard resize step, automatic window
+names, shutdown confirmation, the copy status line color, and the copy-selection
+key.
+
+**Theme** selects one of the built-in palettes or **Default (terminal)**. A
+named theme colors every piece of qmm chrome — status and copy bars, borders,
+help, settings, dialogs, pane numbers, text selection, and the copy cursor —
+and applies a full 256-color ANSI table to pane output. Entries 0–15
+come from the theme's semantic colors; the standard 16–231 color cube and the
+232–255 grayscale ramp are tinted toward the theme background, accent, and
+text. Truecolor RGB output is left untouched. The default theme preserves the
+classic qmm colors and does not change pane output. Themes are saved as
+`theme` under `[appearance]` in `config.toml`.
+
+The status bar color, copy status line color, and active border color default
+to **Theme**, so they follow the selected palette. Choosing **Slate**, **Blue**,
+or one of the explicit accent colors overrides that part of the theme. Both bars
+share an eleven-color palette — **Slate**, **Blue**, **Navy**, **Teal**,
+**Green**, **Olive**, **Amber**, **Orange**, **Red**, **Purple**, and
+**Magenta** — so the session bar and the copy line can be told apart at a
+glance. The active border color comes from its own twelve-color accent palette
+— **Green**, **Cyan**, **Yellow**, **Magenta**, **Blue**, **Lime**, **Amber**,
+**Orange**, **Red**, **Pink**, **Purple**, and **White** — and paints both the
+active pane's border and its tab in the status bar. Some names appear in both
+palettes: a bar color is a dark background, an accent a bright highlight, and
+the settings page previews each choice on its value chip so the difference is
+visible before the page is closed. The default caret is a steady block; turn
+**Cursor blink** on for the 500 ms blink cycle. **Cursor shape** uses the host
+terminal's native DECSCUSR caret — steady block, underline, or bar — so the
+underlying pane text stays visible. qmm toggles that caret's visibility for
+blinking, keeping its rate independent of pane output and frame rate.
+Applications still control cursor visibility; their own DECSCUSR style requests
+are ignored. Terminals without DECSCUSR fall back to their default cursor shape.
+
+The built-in themes mirror qcode's catalog:
+
+| Theme family | Dark ID | Light ID |
+| --- | --- | --- |
+| Catppuccin | `catppuccin-mocha` | `catppuccin-latte` |
+| Dracula | `dracula` | `alucard` |
+| Gruvbox | `gruvbox-dark` | `gruvbox-light` |
+| Solarized | `solarized-dark` | `solarized-light` |
+| Nord | `nord-dark` | `nord-light` |
+| Tokyo Night | `tokyo-night` | `tokyo-night-day` |
+| One | `one-dark` | `one-light` |
+| Rosé Pine | `rose-pine` | `rose-pine-dawn` |
+| Everforest | `everforest-dark` | `everforest-light` |
+| Kanagawa | `kanagawa-wave` | `kanagawa-lotus` |
+| Ayu | `ayu-dark` | `ayu-light` |
+| Flexoki | `flexoki-dark` | `flexoki-light` |
+| Night Owl | `night-owl` | `light-owl` |
+| Monokai | `monokai` | — |
+| GitHub | `github-dark` | `github-light` |
 
 Values are shared by all attached clients for the server's lifetime and are
 saved immediately to `$XDG_CONFIG_HOME/qmm/config.toml` (or
@@ -443,6 +477,7 @@ QMM_SOCKET_DIR=$(mktemp -d) script -qec ./qmm /tmp/qmm.log
 
 - [ ] `qmm` starts a session: shell appears, status bar shows `0:<name>*` plus clock
 - [ ] `printf '\033[31mred\033[0m \033[48;5;22mgreen\033[0m\n'` shows colors in a pane
+- [ ] choose a theme in `Ctrl-a s`; chrome and 256-color pane output recolor, `Default (terminal)` restores the classic colors
 - [ ] active pane border, active window tab, and `Ctrl-a ?` help are color-coded
 - [ ] `Ctrl-a |` splits left/right; `Ctrl-a -` splits top/bottom; the new pane takes focus
 - [ ] `Ctrl-a o` cycles panes; focus follows

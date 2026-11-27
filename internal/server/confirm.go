@@ -99,28 +99,28 @@ func (c *compositor) drawShutdownConfirm(frame *protocol.Frame, setCell helpSetC
 
 	for y := 0; y < max(0, rows-statusRows); y++ {
 		for x := 0; x < cols; x++ {
-			setCell(x, y, ' ', colConfirmMuted, colConfirmBackdrop, 0)
+			setCell(x, y, ' ', c.chrome.help.muted, c.chrome.help.backdrop, 0)
 		}
 	}
 
 	x0, y0, x1, y1 := shutdownConfirmBox(cols, rows)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			setCell(x, y, ' ', colConfirmFG, colConfirmPanelBG, 0)
+			setCell(x, y, ' ', c.chrome.help.fg, c.chrome.help.panelBG, 0)
 		}
 	}
-	drawConfirmFrame(setCell, x0, y0, x1, y1)
+	drawConfirmFrame(setCell, x0, y0, x1, y1, c.chrome.help.panelBG, c.chrome.tooSmall)
 	titleWidth := max(0, x1-x0-3)
-	putHelpText(setCell, x0+2, y0, titleWidth, confirmTitle, colConfirmTitle, colConfirmPanelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y0, titleWidth, confirmTitle, c.chrome.tooSmall, c.chrome.help.panelBG, protocol.StyleBold)
 
 	lines := []struct {
 		text  string
 		fg    int32
 		style uint8
 	}{
-		{confirmQuestion, colConfirmFG, protocol.StyleBold},
-		{confirmDetail, colConfirmFG, 0},
-		{confirmHint, colConfirmMuted, 0},
+		{confirmQuestion, c.chrome.help.fg, protocol.StyleBold},
+		{confirmDetail, c.chrome.help.fg, 0},
+		{confirmHint, c.chrome.help.muted, 0},
 	}
 	bodyY := y0 + 2
 	if y1-y0 < 6 {
@@ -131,29 +131,29 @@ func (c *compositor) drawShutdownConfirm(frame *protocol.Frame, setCell helpSetC
 		if y >= y1 {
 			break
 		}
-		putConfirmLine(setCell, x0, x1, y, line.text, line.fg, line.style)
+		putConfirmLine(setCell, x0, x1, y, line.text, line.fg, line.style, c.chrome.help.panelBG)
 	}
 }
 
-func drawConfirmFrame(setCell helpSetCell, x0, y0, x1, y1 int) {
+func drawConfirmFrame(setCell helpSetCell, x0, y0, x1, y1 int, panelBG, border int32) {
 	style := protocol.StyleBold
 	for x := x0; x <= x1; x++ {
-		setCell(x, y0, '─', colConfirmBorder, colConfirmPanelBG, style)
-		setCell(x, y1, '─', colConfirmBorder, colConfirmPanelBG, style)
+		setCell(x, y0, '─', border, panelBG, style)
+		setCell(x, y1, '─', border, panelBG, style)
 	}
 	for y := y0; y <= y1; y++ {
-		setCell(x0, y, '│', colConfirmBorder, colConfirmPanelBG, style)
-		setCell(x1, y, '│', colConfirmBorder, colConfirmPanelBG, style)
+		setCell(x0, y, '│', border, panelBG, style)
+		setCell(x1, y, '│', border, panelBG, style)
 	}
-	setCell(x0, y0, '╭', colConfirmBorder, colConfirmPanelBG, style)
-	setCell(x1, y0, '╮', colConfirmBorder, colConfirmPanelBG, style)
-	setCell(x0, y1, '╰', colConfirmBorder, colConfirmPanelBG, style)
-	setCell(x1, y1, '╯', colConfirmBorder, colConfirmPanelBG, style)
+	setCell(x0, y0, '╭', border, panelBG, style)
+	setCell(x1, y0, '╮', border, panelBG, style)
+	setCell(x0, y1, '╰', border, panelBG, style)
+	setCell(x1, y1, '╯', border, panelBG, style)
 }
 
-func putConfirmLine(setCell helpSetCell, x0, x1, y int, text string, fg int32, style uint8) {
+func putConfirmLine(setCell helpSetCell, x0, x1, y int, text string, fg int32, style uint8, panelBG int32) {
 	width := max(0, x1-x0-3)
 	textWidth := uniseg.StringWidth(text)
 	offset := min(width, max(0, (width-textWidth)/2))
-	putHelpText(setCell, x0+2+offset, y, width-offset, text, fg, colConfirmPanelBG, style)
+	putHelpText(setCell, x0+2+offset, y, width-offset, text, fg, panelBG, style)
 }

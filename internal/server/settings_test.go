@@ -47,11 +47,11 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	text := frameText(f)
 	for _, want := range []string{
 		"QMM SETTINGS", "Appearance", "Panes", "Layout", "Session",
-		"Status bar clock", "Status bar color", "[Slate]",
+		"Theme", "[Default (terminal)]", "Status bar clock", "Status bar color", "[Theme]",
 		"Active pane border", "Cursor shape", "Cursor blink",
 		"Pane number timeout", "Double-click zoom", "Keyboard resize step",
-		"Automatic window names", "Confirm shutdown", "[On]", "[Green]",
-		"[Block]", "[Off]", "[2s]", "[2 cells]", "Copy mode", "r reload", "q close",
+		"Automatic window names", "Confirm shutdown", "[On]",
+		"[Block]", "[Off]", "[2s]", "[2 cells]", "r reload", "q close",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("settings frame missing %q:\n%s", want, text)
@@ -61,7 +61,7 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	s.handleInput(c, []byte("\x1b[F"))
 	text = frameText(*c.frame)
 	for _, want := range []string{
-		"Copy mode", "Status line color", "[Blue]", "Copy selection key", "[Ctrl-Y]",
+		"Copy mode", "Status line color", "[Theme]", "Copy selection key", "[Ctrl-Y]",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("scrolled settings frame missing %q:\n%s", want, text)
@@ -90,11 +90,14 @@ func TestSettingsNavigationAndAdjustment(t *testing.T) {
 	if c.settingsCursor != 1 {
 		t.Fatalf("down arrow cursor = %d, want 1", c.settingsCursor)
 	}
-	// The active pane border sits below the status-bar rows.
+	// The active pane border sits below the theme and status-bar rows.
+	s.handleInput(c, []byte("\x1b[B"))
 	s.handleInput(c, []byte("\x1b[B"))
 	if want := settingCursorIndex(t, settingBorderColor); c.settingsCursor != want {
 		t.Fatalf("cursor = %d, want Active pane border at %d", c.settingsCursor, want)
 	}
+	// Theme -> Green -> Cyan.
+	s.handleInput(c, []byte("\x1b[C"))
 	s.handleInput(c, []byte("\x1b[C"))
 	if got := s.sess.opts().borderColor(); got != 39 {
 		t.Fatalf("right arrow border color = %d, want cyan 39", got)
@@ -224,7 +227,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 			t.Fatalf("default status bar BG = %d, want the Slate palette %d", got, colBarBG)
 		}
 		navy := statusColorIndex(t, "Navy")
-		s.opts().setByID(settingStatusBarColor, navy)
+		s.opts().setByID(settingStatusBarColor, statusSettingIndex(t, "Navy"))
 		f = (&compositor{}).compose(s, 80, 24, true)
 		if got := cellAt(f, 60, 23).BG; got != statusBarColors[navy].bg {
 			t.Fatalf("status bar BG = %d, want Navy %d", got, statusBarColors[navy].bg)
@@ -240,7 +243,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 
 	t.Run("active border color", func(t *testing.T) {
 		s := newTestSession()
-		s.opts().setByID(settingBorderColor, 1)
+		s.opts().setByID(settingBorderColor, accentSettingIndex(t, "Cyan"))
 		f := (&compositor{}).compose(s, 80, 24, true)
 		if got := cellAt(f, 40, 5).FG; got != 39 {
 			t.Fatalf("active border FG = %d, want cyan 39", got)
@@ -370,6 +373,7 @@ func TestSettingsOverlayIsPerClientButValuesAreShared(t *testing.T) {
 	for c1.settingsCursor < settingCursorIndex(t, settingBorderColor) {
 		s.handleInput(c1, []byte("\x1b[B"))
 	}
+	s.handleInput(c1, []byte("\x1b[C")) // Theme -> Green
 	s.handleInput(c1, []byte("\x1b[C")) // Green -> Cyan, shared value
 	if !strings.Contains(frameText(*c2.frame), "Cyan") {
 		t.Error("second client's settings page did not see the shared value")
@@ -524,9 +528,9 @@ func TestSettingsColorRowsPreviewTheirPalette(t *testing.T) {
 	navy := statusColorIndex(t, "Navy")
 	olive := statusColorIndex(t, "Olive")
 	pink := accentColorIndex(t, "Pink")
-	opts.setByID(settingStatusBarColor, navy)
-	opts.setByID(settingCopyStatusColor, olive)
-	opts.setByID(settingBorderColor, pink)
+	opts.setByID(settingStatusBarColor, statusSettingIndex(t, "Navy"))
+	opts.setByID(settingCopyStatusColor, statusSettingIndex(t, "Olive"))
+	opts.setByID(settingBorderColor, accentSettingIndex(t, "Pink"))
 	fireBinding(s, c, "s")
 	// The page holds 20 rows, so scroll to the end to keep the copy-mode color
 	// row visible alongside the appearance ones.
@@ -541,15 +545,17 @@ func TestSettingsColorRowsPreviewTheirPalette(t *testing.T) {
 	checkValueChip(t, f, settingsRowY(t, f, "Active pane border"), "Pink", colBarActiveFG, accentColorCodes[pink])
 
 	// Cycling the value updates the preview on the selected row.
-	opts.setByID(settingBorderColor, 0)    // Green
-	opts.setByID(settingStatusBarColor, 0) // back to Slate
-	s.handleInput(c, []byte("\x1b[H"))     // Home: the clock is selected
+	opts.setByID(settingBorderColor, 0)    // Theme
+	opts.setByID(settingStatusBarColor, 0) // Theme
+	s.handleInput(c, []byte("\x1b[H"))     // Home: Theme is selected
+	s.handleInput(c, []byte("\x1b[B"))     // Status bar clock
 	s.handleInput(c, []byte("\x1b[B"))     // Status bar color
+	s.handleInput(c, []byte("\x1b[C"))     // Theme -> Slate
 	s.handleInput(c, []byte("\x1b[C"))     // Slate -> Blue
 	f = *c.frame
 	blue := statusBarColors[1]
 	checkValueChip(t, f, settingsRowY(t, f, "Status bar color"), "Blue", blue.fg, blue.bg)
-	checkValueChip(t, f, settingsRowY(t, f, "Active pane border"), "Green", colBarActiveFG, accentColorCodes[0])
+	checkValueChip(t, f, settingsRowY(t, f, "Active pane border"), "Theme", colBarActiveFG, accentColorCodes[0])
 
 	// Options that are not colors keep the selected-row highlight.
 	s.handleInput(c, []byte("\x1b[B")) // Active pane border
@@ -567,4 +573,18 @@ func accentColorIndex(t *testing.T, name string) int {
 	}
 	t.Fatalf("accent %q is not in the palette", name)
 	return 0
+}
+
+// accentSettingIndex is the settings-page value index for an accent, with
+// index 0 reserved for Theme.
+func accentSettingIndex(t *testing.T, name string) int {
+	t.Helper()
+	return accentColorIndex(t, name) + 1
+}
+
+// statusSettingIndex is the settings-page value index for a status palette,
+// with index 0 reserved for Theme.
+func statusSettingIndex(t *testing.T, name string) int {
+	t.Helper()
+	return statusColorIndex(t, name) + 1
 }

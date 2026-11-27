@@ -29,6 +29,7 @@ type fileConfig struct {
 }
 
 type appearanceConfig struct {
+	Theme            string `toml:"theme"`
 	StatusBarClock   string `toml:"status_bar_clock"`
 	StatusBarColor   string `toml:"status_bar_color"`
 	ActivePaneBorder string `toml:"active_pane_border"`
@@ -87,6 +88,7 @@ func configFromSettings(st *settingsState) fileConfig {
 	st.ensure()
 	return fileConfig{
 		Appearance: appearanceConfig{
+			Theme:            settingText(st, settingTheme),
 			StatusBarClock:   settingText(st, settingStatusClock),
 			StatusBarColor:   settingText(st, settingStatusBarColor),
 			ActivePaneBorder: settingText(st, settingBorderColor),
@@ -113,6 +115,7 @@ func configFromSettings(st *settingsState) fileConfig {
 
 func (fc fileConfig) orderedSettings() []configSetting {
 	return []configSetting{
+		{settingTheme, fc.Appearance.Theme},
 		{settingStatusClock, fc.Appearance.StatusBarClock},
 		{settingStatusBarColor, fc.Appearance.StatusBarColor},
 		{settingBorderColor, fc.Appearance.ActivePaneBorder},
@@ -233,8 +236,23 @@ func loadConfig(path string) (settingsState, *configWarning) {
 	}
 
 	var fc fileConfig
-	if _, err := toml.DecodeFile(path, &fc); err != nil {
+	md, err := toml.DecodeFile(path, &fc)
+	if err != nil {
 		return defaults, recoverBrokenConfig(path, fmt.Sprintf("could not parse config: %v", err))
+	}
+	// Configs written before themes existed always stored the old default
+	// color choices. Treat those as Theme (inherit) and keep custom choices as
+	// explicit overrides.
+	if !md.IsDefined("appearance", "theme") {
+		if fc.Appearance.StatusBarColor == statusBarNames[0] {
+			fc.Appearance.StatusBarColor = ""
+		}
+		if fc.Appearance.ActivePaneBorder == accentColorNames[0] {
+			fc.Appearance.ActivePaneBorder = ""
+		}
+		if fc.Copy.StatusLineColor == statusBarNames[1] {
+			fc.Copy.StatusLineColor = ""
+		}
 	}
 	st, err := settingsFromConfig(fc)
 	if err != nil {

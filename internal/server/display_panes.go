@@ -277,7 +277,7 @@ func (c *compositor) drawDisplayPanes(frame *protocol.Frame, setCell helpSetCell
 	for _, p := range panes {
 		c.drawPaneNumber(setCell, p)
 	}
-	drawDisplayPanesHint(frame, setCell, cols, rows, maxNumber+1, c.displayPanesInput, showClock)
+	drawDisplayPanesHint(frame, setCell, cols, rows, maxNumber+1, c.displayPanesInput, showClock, c.chrome.paneNumber)
 }
 
 func clipPaneNumberRect(p protocol.PaneRect, cols, rows int) protocol.PaneRect {
@@ -291,27 +291,25 @@ func clipPaneNumberRect(p protocol.PaneRect, cols, rows int) protocol.PaneRect {
 
 func (c *compositor) drawPaneNumber(setCell helpSetCell, p protocol.PaneRect) {
 	label := strconv.Itoa(p.Number)
-	if drawLargePaneNumber(setCell, p, label, c.displayPanesInput, p.Active) {
+	if drawLargePaneNumber(setCell, p, label, c.displayPanesInput, p.Active, c.chrome.paneNumber) {
 		return
 	}
-	drawCompactPaneNumber(setCell, p, label, c.displayPanesInput, p.Active)
+	drawCompactPaneNumber(setCell, p, label, c.displayPanesInput, p.Active, c.chrome.paneNumber)
 }
 
 // paneNumberBadgeColors picks the badge palette. Panes matching the typed
 // prefix stay bright while the rest fade, so the next digit is obvious.
-// The active pane glows green; the rest use calm cyan on the same dark panel
-// shared with the help and confirm dialogs.
-func paneNumberBadgeColors(active bool, label, input string) (panelBG, borderFG, glyphFG int32, dimmed bool) {
+func paneNumberBadgeColors(active bool, label, input string, pn paneNumberColors) (panelBG, borderFG, glyphFG int32, dimmed bool) {
 	if input != "" && !strings.HasPrefix(label, input) {
-		return colPaneNumberPanelDimBG, colPaneNumberBorderDim, colPaneNumberGlyphDim, true
+		return pn.panelDimBG, pn.borderDim, pn.glyphDim, true
 	}
 	if active {
-		return colPaneNumberActiveBG, colPaneNumberActiveBord, colPaneNumberActiveFG, false
+		return pn.activeBG, pn.activeBorder, pn.activeFG, false
 	}
-	return colPaneNumberPanelBG, colPaneNumberBorder, colPaneNumberGlyph, false
+	return pn.panelBG, pn.border, pn.glyph, false
 }
 
-func drawPaneNumberShadow(setCell helpSetCell, p protocol.PaneRect, x0, y0, x1, y1 int) {
+func drawPaneNumberShadow(setCell helpSetCell, p protocol.PaneRect, x0, y0, x1, y1 int, pn paneNumberColors) {
 	// One-cell drop shadow to the bottom and right, clipped to the pane so
 	// the badge feels lifted without bleeding over a divider.
 	if y1+1 < p.Y+p.H {
@@ -319,7 +317,7 @@ func drawPaneNumberShadow(setCell helpSetCell, p protocol.PaneRect, x0, y0, x1, 
 			if x < p.X || x >= p.X+p.W {
 				continue
 			}
-			setCell(x, y1+1, ' ', protocol.ColorDefault, colPaneNumberShadowBG, 0)
+			setCell(x, y1+1, ' ', protocol.ColorDefault, pn.shadowBG, 0)
 		}
 	}
 	if x1+1 < p.X+p.W {
@@ -327,7 +325,7 @@ func drawPaneNumberShadow(setCell helpSetCell, p protocol.PaneRect, x0, y0, x1, 
 			if y < p.Y || y >= p.Y+p.H {
 				continue
 			}
-			setCell(x1+1, y, ' ', protocol.ColorDefault, colPaneNumberShadowBG, 0)
+			setCell(x1+1, y, ' ', protocol.ColorDefault, pn.shadowBG, 0)
 		}
 	}
 }
@@ -351,18 +349,18 @@ func drawRoundedBadgeBorder(setCell helpSetCell, x0, y0, x1, y1 int, borderFG, p
 	setCell(x1, y1, '╯', borderFG, panelBG, style)
 }
 
-func drawLargePaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input string, active bool) bool {
+func drawLargePaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input string, active bool, pn paneNumberColors) bool {
 	digits := len(label)
 	innerW := digits*3 + digits - 1
 	boxW, boxH := innerW+4, 9
 	if p.W < boxW || p.H < boxH {
 		return false
 	}
-	panelBG, borderFG, glyphFG, dimmed := paneNumberBadgeColors(active, label, input)
+	panelBG, borderFG, glyphFG, dimmed := paneNumberBadgeColors(active, label, input, pn)
 	x0 := p.X + (p.W-boxW)/2
 	y0 := p.Y + (p.H-boxH)/2
 	x1, y1 := x0+boxW-1, y0+boxH-1
-	drawPaneNumberShadow(setCell, p, x0, y0, x1, y1)
+	drawPaneNumberShadow(setCell, p, x0, y0, x1, y1, pn)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
 			setCell(x, y, ' ', glyphFG, panelBG, 0)
@@ -400,19 +398,19 @@ func drawLargePaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input 
 	return true
 }
 
-func drawCompactPaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input string, active bool) {
+func drawCompactPaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input string, active bool, pn paneNumberColors) {
 	// A rounded pill for narrow panes: ╭───╮ / │ 1 │ / ╰───╯.
 	// Falls back to a single centered row when even the pill won't fit.
 	boxW, boxH := len(label)+4, 3
 	if p.W < boxW || p.H < boxH {
-		drawMinimalPaneNumber(setCell, p, label, input, active)
+		drawMinimalPaneNumber(setCell, p, label, input, active, pn)
 		return
 	}
-	panelBG, borderFG, glyphFG, dimmed := paneNumberBadgeColors(active, label, input)
+	panelBG, borderFG, glyphFG, dimmed := paneNumberBadgeColors(active, label, input, pn)
 	x0 := p.X + (p.W-boxW)/2
 	y0 := p.Y + (p.H-boxH)/2
 	x1, y1 := x0+boxW-1, y0+boxH-1
-	drawPaneNumberShadow(setCell, p, x0, y0, x1, y1)
+	drawPaneNumberShadow(setCell, p, x0, y0, x1, y1, pn)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
 			setCell(x, y, ' ', glyphFG, panelBG, 0)
@@ -431,11 +429,11 @@ func drawCompactPaneNumber(setCell helpSetCell, p protocol.PaneRect, label, inpu
 	setCell(x1-1, midY, ' ', glyphFG, panelBG, 0)
 }
 
-func drawMinimalPaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input string, active bool) {
+func drawMinimalPaneNumber(setCell helpSetCell, p protocol.PaneRect, label, input string, active bool, pn paneNumberColors) {
 	if p.W <= 0 || p.H <= 0 {
 		return
 	}
-	panelBG, _, glyphFG, dimmed := paneNumberBadgeColors(active, label, input)
+	panelBG, _, glyphFG, dimmed := paneNumberBadgeColors(active, label, input, pn)
 	style := uint8(protocol.StyleBold)
 	if dimmed {
 		style = 0
@@ -451,7 +449,7 @@ func drawMinimalPaneNumber(setCell helpSetCell, p protocol.PaneRect, label, inpu
 	}
 }
 
-func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows, count int, input string, showClock bool) {
+func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows, count int, input string, showClock bool, pn paneNumberColors) {
 	y := rows - 1
 	start := 0
 	for _, tab := range frame.Tabs {
@@ -469,7 +467,7 @@ func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows
 		return
 	}
 	for x := start; x < end; x++ {
-		setCell(x, y, ' ', colPaneNumberHintFG, colPaneNumberHintBG, 0)
+		setCell(x, y, ' ', pn.hintFG, pn.hintBG, 0)
 	}
 	hint := ""
 	switch {
@@ -487,5 +485,5 @@ func drawDisplayPanesHint(frame *protocol.Frame, setCell helpSetCell, cols, rows
 			hint = fmt.Sprintf(" pane 0-%d ", count-1)
 		}
 	}
-	putHelpText(setCell, start, y, width, fitHelpText(hint, width), colPaneNumberHintFG, colPaneNumberHintBG, protocol.StyleBold)
+	putHelpText(setCell, start, y, width, fitHelpText(hint, width), pn.hintFG, pn.hintBG, protocol.StyleBold)
 }

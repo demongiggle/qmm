@@ -357,13 +357,13 @@ func TestCopyStatusLineColorSetting(t *testing.T) {
 		t.Fatal("default copy and session status lines share a background")
 	}
 
-	green := statusColorIndex(t, "Green")
+	green := statusSettingIndex(t, "Green")
 	s.sess.opts().setByID(settingCopyStatusColor, green)
 	s.broadcast()
-	if got, want := cellAt(*c.frame, 0, barY).BG, statusBarColors[green].bg; got != want {
+	if got, want := cellAt(*c.frame, 0, barY).BG, statusBarColors[green-1].bg; got != want {
 		t.Fatalf("copy status background = %d, want configured %d", got, want)
 	}
-	if got, want := cellAt(*c.frame, 1, barY).FG, statusBarColors[green].accent; got != want {
+	if got, want := cellAt(*c.frame, 1, barY).FG, statusBarColors[green-1].accent; got != want {
 		t.Fatalf("copy status label FG = %d, want %d", got, want)
 	}
 }

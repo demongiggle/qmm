@@ -7,6 +7,7 @@ import (
 	"github.com/rivo/uniseg"
 
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/theme"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 type settingID string
 
 const (
+	settingTheme           settingID = "theme"
 	settingStatusClock     settingID = "status_clock"
 	settingBorderColor     settingID = "border_color"
 	settingCursorShape     settingID = "cursor_shape"
@@ -100,15 +102,23 @@ var (
 	// letter chords terminals commonly grab for their own clipboard. See
 	// docs/investigations/terminal-copy-keys-2026.md.
 	copyKeyNames = []string{"Ctrl-Y", "Ctrl-Shift-X", "Ctrl-Shift-C", "Ctrl-Insert"}
+
+	themeIDs    = theme.IDs()
+	themeLabels = theme.Labels()
+
+	statusBarNamesWithTheme   = append([]string{"Theme"}, statusBarNames...)
+	accentColorNamesWithTheme = append([]string{"Theme"}, accentColorNames...)
 )
 
-// settingDef is one adjustable row in the settings page. Default is an
-// index into Values, so the page and the behavior getters share one source
-// of truth.
+// settingDef is one adjustable row in the settings page. Default is an index
+// into Values, so the page and the behavior getters share one source of truth.
+// Labels, when set, are the display strings for Values; the values themselves
+// are what gets persisted.
 type settingDef struct {
 	ID      settingID
 	Label   string
 	Values  []string
+	Labels  []string
 	Default int
 }
 
@@ -121,9 +131,10 @@ var settingsSections = []settingsSection{
 	{
 		Title: "Appearance",
 		Options: []settingDef{
+			{ID: settingTheme, Label: "Theme", Values: themeIDs, Labels: themeLabels, Default: 0},
 			{ID: settingStatusClock, Label: "Status bar clock", Values: onOffValues, Default: 0},
-			{ID: settingStatusBarColor, Label: "Status bar color", Values: statusBarNames, Default: 0},
-			{ID: settingBorderColor, Label: "Active pane border", Values: accentColorNames, Default: 0},
+			{ID: settingStatusBarColor, Label: "Status bar color", Values: statusBarNamesWithTheme, Default: 0},
+			{ID: settingBorderColor, Label: "Active pane border", Values: accentColorNamesWithTheme, Default: 0},
 			{ID: settingCursorShape, Label: "Cursor shape", Values: cursorShapeNames, Default: 0},
 			{ID: settingCursorBlink, Label: "Cursor blink", Values: onOffValues, Default: 1},
 		},
@@ -151,7 +162,7 @@ var settingsSections = []settingsSection{
 	{
 		Title: "Copy mode",
 		Options: []settingDef{
-			{ID: settingCopyStatusColor, Label: "Status line color", Values: statusBarNames, Default: 1},
+			{ID: settingCopyStatusColor, Label: "Status line color", Values: statusBarNamesWithTheme, Default: 0},
 			{ID: settingCopyKey, Label: "Copy selection key", Values: copyKeyNames, Default: 0},
 		},
 	},
@@ -251,6 +262,19 @@ func (st *settingsState) text(def settingDef) string {
 	return def.Values[st.index(def)]
 }
 
+// label is the human-readable display form of the current value. Values are
+// what gets persisted; Labels let settings such as Theme show a friendly name.
+func (st *settingsState) label(def settingDef) string {
+	if len(def.Values) == 0 {
+		return ""
+	}
+	idx := st.index(def)
+	if idx >= 0 && idx < len(def.Labels) {
+		return def.Labels[idx]
+	}
+	return def.Values[idx]
+}
+
 func (st *settingsState) setByID(id settingID, idx int) bool {
 	def, ok := settingByID(id)
 	if !ok {
@@ -272,19 +296,66 @@ func (st *settingsState) showClock() bool {
 	return st.boolSetting(settingStatusClock, true)
 }
 
-// borderColor is the accent that marks the active pane: its border, and its
-// tab in the session status bar. The default is the accent palette's first
-// entry, so both stay in step.
-func (st *settingsState) borderColor() int32 {
-	def, ok := settingByID(settingBorderColor)
+// themePalette returns the selected theme. Missing or invalid values fall
+// back to the terminal-default palette.
+func (st *settingsState) themePalette() theme.Palette {
+	def, ok := settingByID(settingTheme)
 	if !ok {
-		return accentColorCodes[0]
+		return theme.Default()
 	}
 	idx := st.index(def)
-	if idx < 0 || idx >= len(accentColorCodes) {
-		return accentColorCodes[0]
+	if idx < 0 || idx >= len(themeIDs) {
+		return theme.Default()
 	}
-	return accentColorCodes[idx]
+	p, ok := theme.Lookup(themeIDs[idx])
+	if !ok {
+		return theme.Default()
+	}
+	return p
+}
+
+// paletteOverride returns the explicit palette index for a color setting.
+// Index 0 is the Theme (inherit) choice, and returns ok=false.
+func (st *settingsState) paletteOverride(id settingID) (int, bool) {
+	def, ok := settingByID(id)
+	if !ok {
+		return 0, false
+	}
+	idx := st.index(def)
+	if idx <= 0 || idx > 256 {
+		return 0, false
+	}
+	return idx - 1, true
+}
+
+// chrome resolves the active theme and applies explicit per-color overrides.
+// The result is cached by the compositor for one frame.
+func (st *settingsState) chrome() chrome {
+	c := chromeForPalette(st.themePalette())
+	if idx, ok := st.paletteOverride(settingStatusBarColor); ok {
+		if idx < len(statusBarColors) {
+			c.statusBar = statusBarColors[idx]
+		}
+	}
+	if idx, ok := st.paletteOverride(settingCopyStatusColor); ok {
+		if idx < len(statusBarColors) {
+			c.copyStatus = statusBarColors[idx]
+		}
+	}
+	if idx, ok := st.paletteOverride(settingBorderColor); ok {
+		if idx < len(accentColorCodes) {
+			c.activeBorder = accentColorCodes[idx]
+			c.activeFG = colBarActiveFG
+		}
+	}
+	return c
+}
+
+// borderColor is the accent that marks the active pane: its border, and its
+// tab in the session status bar. Theme supplies the default; an explicit
+// accent palette entry overrides it.
+func (st *settingsState) borderColor() int32 {
+	return st.chrome().activeBorder
 }
 
 func (st *settingsState) cursorShape() uint8 {
@@ -344,47 +415,53 @@ func (st *settingsState) confirmShutdown() bool {
 	return st.boolSetting(settingConfirmShutdown, true)
 }
 
-// statusBarStyleAt returns the palette entry for one status-bar color setting,
-// falling back to fallback when the setting is missing or out of range.
-func (st *settingsState) statusBarStyleAt(id settingID, fallback int) statusBarStyle {
-	def, ok := settingByID(id)
-	if !ok {
-		return statusBarColors[fallback]
-	}
-	idx := st.index(def)
-	if idx < 0 || idx >= len(statusBarColors) {
-		return statusBarColors[fallback]
-	}
-	return statusBarColors[idx]
-}
-
 // statusBarStyle colors the session status bar (tabs and clock).
 func (st *settingsState) statusBarStyle() statusBarStyle {
-	return st.statusBarStyleAt(settingStatusBarColor, 0)
+	return st.chrome().statusBar
 }
 
 // copyStatusStyle colors the copy-mode status line that covers the session bar.
 func (st *settingsState) copyStatusStyle() statusBarStyle {
-	return st.statusBarStyleAt(settingCopyStatusColor, 1)
+	return st.chrome().copyStatus
 }
 
-// settingPreviewStyle returns the colors that preview one color-setting value
-// on its settings row: the bar text/background pair for the two status lines,
-// and the dark-on-accent pair the active tab uses. ok is false for options that
-// do not pick a color.
-func settingPreviewStyle(def settingDef, idx int) (fg, bg int32, ok bool) {
+// previewStyle returns the colors that preview one setting value on its
+// settings row. ok is false for options that do not pick a color.
+func (st *settingsState) previewStyle(def settingDef, idx int) (fg, bg int32, ok bool) {
 	switch def.ID {
-	case settingStatusBarColor, settingCopyStatusColor:
-		if idx < 0 || idx >= len(statusBarColors) {
+	case settingTheme:
+		if idx < 0 || idx >= len(themeIDs) {
 			return 0, 0, false
 		}
-		style := statusBarColors[idx]
+		p, ok := theme.Lookup(themeIDs[idx])
+		if !ok {
+			return 0, 0, false
+		}
+		style := chromeForPalette(p).statusBar
+		return style.fg, style.bg, true
+	case settingStatusBarColor, settingCopyStatusColor:
+		if idx == 0 {
+			c := st.chrome()
+			style := c.statusBar
+			if def.ID == settingCopyStatusColor {
+				style = c.copyStatus
+			}
+			return style.fg, style.bg, true
+		}
+		if idx < 1 || idx > len(statusBarColors) {
+			return 0, 0, false
+		}
+		style := statusBarColors[idx-1]
 		return style.fg, style.bg, true
 	case settingBorderColor:
-		if idx < 0 || idx >= len(accentColorCodes) {
+		if idx == 0 {
+			c := st.chrome()
+			return c.activeFG, c.activeBorder, true
+		}
+		if idx < 1 || idx > len(accentColorCodes) {
 			return 0, 0, false
 		}
-		return colBarActiveFG, accentColorCodes[idx], true
+		return colBarActiveFG, accentColorCodes[idx-1], true
 	default:
 		return 0, 0, false
 	}
@@ -614,21 +691,21 @@ func (c *compositor) drawSettings(frame *protocol.Frame, setCell helpSetCell, co
 
 	for y := 0; y < max(0, rows-statusRows); y++ {
 		for x := 0; x < cols; x++ {
-			setCell(x, y, ' ', colHelpMuted, colHelpBackdrop, 0)
+			setCell(x, y, ' ', c.chrome.help.muted, c.chrome.help.backdrop, 0)
 		}
 	}
 
 	x0, y0, x1, y1 := helpBox(cols, rows)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			setCell(x, y, ' ', colHelpFG, colHelpPanelBG, 0)
+			setCell(x, y, ' ', c.chrome.help.fg, c.chrome.help.panelBG, 0)
 		}
 	}
-	drawHelpFrame(setCell, x0, y0, x1, y1)
+	drawHelpFrame(setCell, x0, y0, x1, y1, c.chrome.help)
 
 	titleWidth := max(0, x1-x0-3)
-	putHelpText(setCell, x0+2, y0, titleWidth, " QMM SETTINGS · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
-	putHelpText(setCell, x0+2, y1, titleWidth, fitHelpText(settingsFooter(view), titleWidth), colHelpMuted, colHelpPanelBG, 0)
+	putHelpText(setCell, x0+2, y0, titleWidth, " QMM SETTINGS · PREFIX: Ctrl-a ", c.chrome.help.title, c.chrome.help.panelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y1, titleWidth, fitHelpText(settingsFooter(view), titleWidth), c.chrome.help.muted, c.chrome.help.panelBG, 0)
 
 	innerX := x0 + 2
 	innerRight := x1 - 2
@@ -643,25 +720,25 @@ func (c *compositor) drawSettings(frame *protocol.Frame, setCell helpSetCell, co
 			top:         view.top,
 			maxTop:      view.maxTop,
 			lineCount:   view.lineCount,
-		})
+		}, c.chrome.help)
 	}
 	for i := 0; i < view.contentRows; i++ {
 		idx := view.top + i
 		if idx >= len(view.lines) {
 			break
 		}
-		drawSettingsLine(setCell, innerX, y0+1+i, width, view.lines[idx], view.cursor, opts)
+		c.drawSettingsLine(setCell, innerX, y0+1+i, width, view.lines[idx], view.cursor, opts)
 	}
 }
 
-func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, cursor int, opts *settingsState) {
+func (c *compositor) drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, cursor int, opts *settingsState) {
 	if line.blank {
 		return
 	}
 	if line.header != "" {
-		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", colHelpHeader, colHelpPanelBG, protocol.StyleBold)
+		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", c.chrome.help.header, c.chrome.help.panelBG, protocol.StyleBold)
 		for i := used + 1; i < width; i++ {
-			setCell(x+i, y, '─', colHelpMuted, colHelpPanelBG, 0)
+			setCell(x+i, y, '─', c.chrome.help.muted, c.chrome.help.panelBG, 0)
 		}
 		return
 	}
@@ -670,15 +747,15 @@ func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, c
 	}
 
 	selected := line.cursor == cursor
-	fg, bg := int32(colHelpFG), int32(colHelpPanelBG)
+	fg, bg := c.chrome.help.fg, c.chrome.help.panelBG
 	if selected {
-		fg, bg = colSettingsSelectedFG, colSettingsSelectedBG
+		fg, bg = c.chrome.settingsFG, c.chrome.settingsBG
 	}
 	for i := 0; i < width; i++ {
 		setCell(x+i, y, ' ', fg, bg, 0)
 	}
 
-	value := "[" + opts.text(line.def) + "]"
+	value := "[" + opts.label(line.def) + "]"
 	valueWidth := uniseg.StringWidth(value)
 	if valueWidth+4 > width {
 		valueWidth = max(1, width-2)
@@ -699,11 +776,11 @@ func drawSettingsLine(setCell helpSetCell, x, y, width int, line settingsLine, c
 	// Color options paint the value chip with the palette they select, so the
 	// row previews the bar or accent before it is applied. Other options
 	// highlight their chip while selected.
-	vfg, vbg := int32(colHelpKeyFG), int32(colHelpKeyBG)
-	if pfg, pbg, ok := settingPreviewStyle(line.def, opts.index(line.def)); ok {
+	vfg, vbg := c.chrome.help.keyFG, c.chrome.help.keyBG
+	if pfg, pbg, ok := opts.previewStyle(line.def, opts.index(line.def)); ok {
 		vfg, vbg = pfg, pbg
 	} else if selected {
-		vfg, vbg = int32(colBarActiveFG), opts.borderColor()
+		vfg, vbg = c.chrome.activeFG, c.chrome.activeBorder
 	}
 	for i := 0; i < valueWidth; i++ {
 		setCell(valueX+i, y, ' ', vfg, vbg, protocol.StyleBold)

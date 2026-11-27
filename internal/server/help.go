@@ -383,21 +383,21 @@ func (c *compositor) drawHelp(frame *protocol.Frame, setCell helpSetCell, cols, 
 
 	for y := 0; y < max(0, rows-statusRows); y++ {
 		for x := 0; x < cols; x++ {
-			setCell(x, y, ' ', colHelpMuted, colHelpBackdrop, 0)
+			setCell(x, y, ' ', c.chrome.help.muted, c.chrome.help.backdrop, 0)
 		}
 	}
 
 	x0, y0, x1, y1 := helpBox(cols, rows)
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {
-			setCell(x, y, ' ', colHelpFG, colHelpPanelBG, 0)
+			setCell(x, y, ' ', c.chrome.help.fg, c.chrome.help.panelBG, 0)
 		}
 	}
-	drawHelpFrame(setCell, x0, y0, x1, y1)
+	drawHelpFrame(setCell, x0, y0, x1, y1, c.chrome.help)
 
 	titleWidth := max(0, x1-x0-3)
-	putHelpText(setCell, x0+2, y0, titleWidth, " QMM HELP · PREFIX: Ctrl-a ", colHelpTitle, colHelpPanelBG, protocol.StyleBold)
-	putHelpText(setCell, x0+2, y1, titleWidth, helpFooter(view), colHelpMuted, colHelpPanelBG, 0)
+	putHelpText(setCell, x0+2, y0, titleWidth, " QMM HELP · PREFIX: Ctrl-a ", c.chrome.help.title, c.chrome.help.panelBG, protocol.StyleBold)
+	putHelpText(setCell, x0+2, y1, titleWidth, helpFooter(view), c.chrome.help.muted, c.chrome.help.panelBG, 0)
 
 	innerX := x0 + 2
 	innerRight := x1 - 2
@@ -406,7 +406,7 @@ func (c *compositor) drawHelp(frame *protocol.Frame, setCell helpSetCell, cols, 
 	if view.scrollable {
 		width = max(1, width-1)
 		scrollX = innerRight
-		drawHelpScrollbar(setCell, scrollX, y0+1, view.contentRows, view)
+		drawHelpScrollbar(setCell, scrollX, y0+1, view.contentRows, view, c.chrome.help)
 	}
 
 	columns := view.columns
@@ -431,25 +431,25 @@ func (c *compositor) drawHelp(frame *protocol.Frame, setCell helpSetCell, cols, 
 			if j >= view.contentRows {
 				break
 			}
-			drawHelpLine(setCell, x, y0+1+j, colWidth, line, badgeWidth)
+			drawHelpLine(setCell, x, y0+1+j, colWidth, line, badgeWidth, c.chrome.help)
 		}
 	}
 }
 
-func drawHelpFrame(setCell helpSetCell, x0, y0, x1, y1 int) {
+func drawHelpFrame(setCell helpSetCell, x0, y0, x1, y1 int, h helpColors) {
 	style := protocol.StyleBold
 	for x := x0; x <= x1; x++ {
-		setCell(x, y0, '─', colHelpBorder, colHelpPanelBG, style)
-		setCell(x, y1, '─', colHelpBorder, colHelpPanelBG, style)
+		setCell(x, y0, '─', h.border, h.panelBG, style)
+		setCell(x, y1, '─', h.border, h.panelBG, style)
 	}
 	for y := y0; y <= y1; y++ {
-		setCell(x0, y, '│', colHelpBorder, colHelpPanelBG, style)
-		setCell(x1, y, '│', colHelpBorder, colHelpPanelBG, style)
+		setCell(x0, y, '│', h.border, h.panelBG, style)
+		setCell(x1, y, '│', h.border, h.panelBG, style)
 	}
-	setCell(x0, y0, '╭', colHelpBorder, colHelpPanelBG, style)
-	setCell(x1, y0, '╮', colHelpBorder, colHelpPanelBG, style)
-	setCell(x0, y1, '╰', colHelpBorder, colHelpPanelBG, style)
-	setCell(x1, y1, '╯', colHelpBorder, colHelpPanelBG, style)
+	setCell(x0, y0, '╭', h.border, h.panelBG, style)
+	setCell(x1, y0, '╮', h.border, h.panelBG, style)
+	setCell(x0, y1, '╰', h.border, h.panelBG, style)
+	setCell(x1, y1, '╯', h.border, h.panelBG, style)
 }
 
 func helpFooter(view helpView) string {
@@ -461,12 +461,12 @@ func helpFooter(view helpView) string {
 	return fmt.Sprintf(" q/Esc close · ↑/↓ · %d-%d/%d ", first, last, view.lineCount)
 }
 
-func drawHelpScrollbar(setCell helpSetCell, x, y, height int, view helpView) {
+func drawHelpScrollbar(setCell helpSetCell, x, y, height int, view helpView, h helpColors) {
 	if height < 1 {
 		return
 	}
 	for i := 0; i < height; i++ {
-		setCell(x, y+i, '│', colHelpMuted, colHelpPanelBG, 0)
+		setCell(x, y+i, '│', h.muted, h.panelBG, 0)
 	}
 	thumbHeight := max(1, height*height/max(1, view.lineCount))
 	if thumbHeight > height {
@@ -477,29 +477,29 @@ func drawHelpScrollbar(setCell helpSetCell, x, y, height int, view helpView) {
 		thumbY += (height - thumbHeight) * view.top / view.maxTop
 	}
 	for i := 0; i < thumbHeight; i++ {
-		setCell(x, thumbY+i, '█', colHelpTitle, colHelpPanelBG, protocol.StyleBold)
+		setCell(x, thumbY+i, '█', h.title, h.panelBG, protocol.StyleBold)
 	}
 }
 
-func drawHelpLine(setCell helpSetCell, x, y, width int, line helpLine, badgeWidth int) {
+func drawHelpLine(setCell helpSetCell, x, y, width int, line helpLine, badgeWidth int, h helpColors) {
 	if line.blank {
 		return
 	}
 	if line.header != "" {
-		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", colHelpHeader, colHelpPanelBG, protocol.StyleBold)
+		used := putHelpText(setCell, x, y, width, "▸ "+line.header+" ", h.header, h.panelBG, protocol.StyleBold)
 		for i := used + 1; i < width; i++ {
-			setCell(x+i, y, '─', colHelpMuted, colHelpPanelBG, 0)
+			setCell(x+i, y, '─', h.muted, h.panelBG, 0)
 		}
 		return
 	}
 	badgeWidth = min(badgeWidth, max(4, width-4))
 	for i := 0; i < badgeWidth; i++ {
-		setCell(x+i, y, ' ', colHelpKeyFG, colHelpKeyBG, protocol.StyleBold)
+		setCell(x+i, y, ' ', h.keyFG, h.keyBG, protocol.StyleBold)
 	}
-	putHelpText(setCell, x+1, y, max(1, badgeWidth-2), fitHelpText(line.key, max(1, badgeWidth-2)), colHelpKeyFG, colHelpKeyBG, protocol.StyleBold)
+	putHelpText(setCell, x+1, y, max(1, badgeWidth-2), fitHelpText(line.key, max(1, badgeWidth-2)), h.keyFG, h.keyBG, protocol.StyleBold)
 	descWidth := width - badgeWidth - 2
 	if descWidth > 0 {
-		putHelpText(setCell, x+badgeWidth+2, y, descWidth, fitHelpText(line.desc, descWidth), colHelpFG, colHelpPanelBG, 0)
+		putHelpText(setCell, x+badgeWidth+2, y, descWidth, fitHelpText(line.desc, descWidth), h.fg, h.panelBG, 0)
 	}
 }
 

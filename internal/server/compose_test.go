@@ -516,7 +516,7 @@ func TestSnapshotLineLayout(t *testing.T) {
 	draw := func(x, y int, ch rune, fg, bg int32, st uint8) {
 		set[[2]int{x, y}] = ch
 	}
-	blitSnapshotLine(draw, row, 10, 0, 20, nil)
+	blitSnapshotLine(draw, row, 10, 0, 20, nil, nil)
 	for x, ch := range want {
 		if got := set[[2]int{10 + x, 0}]; got != ch {
 			t.Errorf("snapshotted cell at screen col %d = %q, want %q", 10+x, got, ch)
