@@ -4,10 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hinshun/vt10x"
-
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
 func newTestSession() *session {
@@ -260,5 +259,35 @@ func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
 	}
 	if overlay.CursorVisible {
 		t.Error("settings overlay should hide the pane cursor")
+	}
+}
+
+func TestComposePreservesBackgroundOnVimLineScroll(t *testing.T) {
+	s := newTestSession()
+	p := s.panes[1]
+	comp := &compositor{}
+
+	// Initial full-screen draw with Normal background 235 (matching vim's
+	// startup / Ctrl+F / Ctrl+B clear sequence).
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2Jline1\r\nline2")); err != nil {
+		t.Fatalf("write initial screen: %v", err)
+	}
+	_ = comp.compose(s, 80, 24, true)
+
+	// Vim scrolls down by one line using DECSTBM + CUP to bottom of region + LF,
+	// relying on xterm-256color BCE to fill the newly exposed row with BG 235
+	// before writing only the non-blank prefix of the new line.
+	if _, err := p.vt.Write([]byte("\x1b[1;22r\x1b[22;1H\r\n\x1b[1;23r\x1b[22;1Hshort")); err != nil {
+		t.Fatalf("write vim line scroll: %v", err)
+	}
+	f := comp.compose(s, 80, 24, true)
+
+	// Row 21 (1-based row 22) must have BG 235 on both the written text and
+	// the trailing blank cells after it.
+	for _, x := range []int{0, 4, 5, 20, 38} {
+		got := cellAt(f, x, 21)
+		if got.BG != 235 {
+			t.Errorf("scrolled row cell (%d,21) = %+v, want BG 235", x, got)
+		}
 	}
 }

@@ -6,10 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hinshun/vt10x"
-
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
 func newManyPaneServer(t *testing.T, count int) (*Server, *clientConn) {

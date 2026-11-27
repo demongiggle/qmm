@@ -5,11 +5,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/hinshun/vt10x"
 	"github.com/rivo/uniseg"
 
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
 // vt10x glyph attribute bits (see vt10x state.go).

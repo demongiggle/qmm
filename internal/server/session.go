@@ -12,12 +12,11 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/hinshun/vt10x"
-
 	"github.com/creack/pty"
 
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
 const (
