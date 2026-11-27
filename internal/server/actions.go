@@ -7,6 +7,7 @@ import (
 
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
 const (
@@ -525,6 +526,60 @@ func (s *Server) writeRaw(c *clientConn, data []byte) {
 	_, _ = p.ptmx.Write(data)
 }
 
+// paneAppCursor reports whether the active pane's application wants cursor
+// keys (arrows, Home, End) in SS3 application form (ESC O X) instead of the
+// normal CSI form (ESC [ X). Full-screen programs and line editors like zsh
+// enable DECCKM (via smkx, ESC[?1h) and then expect khome/kend/kcuu1 etc.
+// from terminfo (ESC O H/F/A...). qmm's client always sends the normal CSI
+// form, so translate here based on the pane's tracked VT mode. Modified
+// keys (ESC[1;5A etc.) stay in CSI form in both modes, matching terminfo.
+func (s *Server) paneAppCursor() bool {
+	if s.sess == nil {
+		return false
+	}
+	p := s.sess.activePane()
+	if p == nil || p.vt == nil {
+		return false
+	}
+	p.vt.Lock()
+	mode := p.vt.Mode()
+	p.vt.Unlock()
+	return mode&vt10x.ModeAppCursor != 0
+}
+
+// translateAppCursor rewrites unmodified CSI cursor-key sequences to their
+// SS3 application-mode equivalents. Only the six plain three-byte sequences
+// are touched; parameterized (modified) sequences pass through unchanged.
+func translateAppCursor(data []byte, app bool) []byte {
+	if !app || len(data) == 0 {
+		return data
+	}
+	// Fast path: no ESC, nothing to translate.
+	hasEsc := false
+	for _, b := range data {
+		if b == 0x1b {
+			hasEsc = true
+			break
+		}
+	}
+	if !hasEsc {
+		return data
+	}
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		if i+2 < len(data) && data[i] == 0x1b && data[i+1] == '[' {
+			switch data[i+2] {
+			case 'A', 'B', 'C', 'D', 'H', 'F':
+				out = append(out, 0x1b, 'O', data[i+2])
+				i += 2
+				continue
+			}
+		}
+		out = append(out, data[i])
+	}
+	return out
+}
+
 func (s *Server) handleInput(c *clientConn, data []byte) {
 	// A pending mouse selection intercepts exactly one key: the configured
 	// copy key. Every other key returns to the live pane first, so typing,
@@ -588,7 +643,7 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 		if pending.Len() == 0 {
 			return
 		}
-		s.writeRaw(c, pending.Bytes())
+		s.writeRaw(c, translateAppCursor(pending.Bytes(), s.paneAppCursor()))
 		pending.Reset()
 	}
 	for i := 0; i < len(data); i++ {

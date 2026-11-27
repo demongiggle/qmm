@@ -9,6 +9,108 @@ import (
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
+func TestTranslateAppCursor(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		app  bool
+		want string
+	}{
+		{"home normal", "\x1b[H", false, "\x1b[H"},
+		{"home app", "\x1b[H", true, "\x1bOH"},
+		{"end normal", "\x1b[F", false, "\x1b[F"},
+		{"end app", "\x1b[F", true, "\x1bOF"},
+		{"up app", "\x1b[A", true, "\x1bOA"},
+		{"down app", "\x1b[B", true, "\x1bOB"},
+		{"right app", "\x1b[C", true, "\x1bOC"},
+		{"left app", "\x1b[D", true, "\x1bOD"},
+		{"up normal", "\x1b[A", false, "\x1b[A"},
+		{"ctrl-home app stays CSI", "\x1b[1;5H", true, "\x1b[1;5H"},
+		{"ctrl-end app stays CSI", "\x1b[1;5F", true, "\x1b[1;5F"},
+		{"ctrl-up app stays CSI", "\x1b[1;5A", true, "\x1b[1;5A"},
+		{"shift-home app stays CSI", "\x1b[1;2H", true, "\x1b[1;2H"},
+		{"plain text untouched", "hello", true, "hello"},
+		{"insert untouched", "\x1b[2~", true, "\x1b[2~"},
+		{"delete untouched", "\x1b[3~", true, "\x1b[3~"},
+		{"pgup untouched", "\x1b[5~", true, "\x1b[5~"},
+		{"empty", "", true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(translateAppCursor([]byte(tc.in), tc.app))
+			if got != tc.want {
+				t.Fatalf("translateAppCursor(%q, app=%v) = %q, want %q", tc.in, tc.app, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHomeEndForwardingRespectsAppCursorMode(t *testing.T) {
+	readPane := func(f *os.File) string {
+		t.Helper()
+		raw, err := os.ReadFile(f.Name())
+		if err != nil {
+			t.Fatalf("read pane input: %v", err)
+		}
+		return string(raw)
+	}
+
+	// Normal mode: CSI passes through untouched.
+	s, c := newHelpServer(80, 24)
+	f, err := os.CreateTemp(t.TempDir(), "pane-input")
+	if err != nil {
+		t.Fatalf("temp pane input: %v", err)
+	}
+	defer f.Close()
+	s.sess.activePane().ptmx = f
+	s.handleInput(c, []byte("\x1b[H"))
+	s.handleInput(c, []byte("\x1b[F"))
+	s.handleInput(c, []byte("\x1b[A"))
+	if got, want := readPane(f), "\x1b[H\x1b[F\x1b[A"; got != want {
+		t.Fatalf("normal-mode pane input = %q, want %q", got, want)
+	}
+
+	// Application cursor mode (smkx/DECCKM): unmodified cursor keys become SS3.
+	s2, c2 := newHelpServer(80, 24)
+	f2, err := os.CreateTemp(t.TempDir(), "pane-input-app")
+	if err != nil {
+		t.Fatalf("temp pane input: %v", err)
+	}
+	defer f2.Close()
+	s2.sess.activePane().ptmx = f2
+	if _, err := s2.sess.activePane().vt.Write([]byte("\x1b[?1h")); err != nil {
+		t.Fatalf("enable DECCKM: %v", err)
+	}
+	if !s2.paneAppCursor() {
+		t.Fatal("paneAppCursor = false after DECCKM set, want true")
+	}
+	s2.handleInput(c2, []byte("\x1b[H"))
+	s2.handleInput(c2, []byte("\x1b[F"))
+	s2.handleInput(c2, []byte("\x1b[A"))
+	s2.handleInput(c2, []byte("\x1b[B"))
+	s2.handleInput(c2, []byte("\x1b[C"))
+	s2.handleInput(c2, []byte("\x1b[D"))
+	if got, want := readPane(f2), "\x1bOH\x1bOF\x1bOA\x1bOB\x1bOC\x1bOD"; got != want {
+		t.Fatalf("app-mode pane input = %q, want %q", got, want)
+	}
+
+	// Modified keys stay CSI even in application mode.
+	s3, c3 := newHelpServer(80, 24)
+	f3, err := os.CreateTemp(t.TempDir(), "pane-input-mod")
+	if err != nil {
+		t.Fatalf("temp pane input: %v", err)
+	}
+	defer f3.Close()
+	s3.sess.activePane().ptmx = f3
+	if _, err := s3.sess.activePane().vt.Write([]byte("\x1b[?1h")); err != nil {
+		t.Fatalf("enable DECCKM: %v", err)
+	}
+	s3.handleInput(c3, []byte("\x1b[1;5H"))
+	s3.handleInput(c3, []byte("\x1b[1;5A"))
+	if got, want := readPane(f3), "\x1b[1;5H\x1b[1;5A"; got != want {
+		t.Fatalf("modified pane input = %q, want %q", got, want)
+	}
+}
 func TestSplitPrefixBindings(t *testing.T) {
 	// "|" and "-" replace the tmux-style "%" and "\"" split keys.
 	for _, seq := range []string{"|", "-"} {
