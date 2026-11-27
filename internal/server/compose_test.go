@@ -120,13 +120,14 @@ func TestComposePreservesPaneAndWindowColors(t *testing.T) {
 	}
 
 	// Window chrome: the active tab and active pane border carry colors too.
+	// Both use the accent palette's default entry.
 	tab := cellAt(f, 0, 23)
-	if tab.FG != colBarActiveFG || tab.BG != colBarActiveBG {
-		t.Errorf("active tab colors = %d/%d, want %d/%d", tab.FG, tab.BG, colBarActiveFG, colBarActiveBG)
+	if tab.FG != colBarActiveFG || tab.BG != accentColorCodes[0] {
+		t.Errorf("active tab colors = %d/%d, want %d/%d", tab.FG, tab.BG, colBarActiveFG, accentColorCodes[0])
 	}
 	border := cellAt(f, 40, 5)
-	if border.FG != colBorderActive {
-		t.Errorf("active border color = %d, want %d", border.FG, colBorderActive)
+	if border.FG != accentColorCodes[0] {
+		t.Errorf("active border color = %d, want %d", border.FG, accentColorCodes[0])
 	}
 }
 

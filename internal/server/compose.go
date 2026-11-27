@@ -24,13 +24,11 @@ const (
 const (
 	colDefault = protocol.ColorDefault
 
-	colBorder       = 238
-	colBorderActive = 46
-	colBarBG        = 236
-	colBarFG        = 248
-	colBarActiveFG  = 16
-	colBarActiveBG  = 46
-	colTooSmall     = 203
+	colBorder      = 238
+	colBarBG       = 236
+	colBarFG       = 248
+	colBarActiveFG = 16
+	colTooSmall    = 203
 
 	colHelpBackdrop = 233
 	colHelpPanelBG  = 235

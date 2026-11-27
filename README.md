@@ -234,16 +234,17 @@ Both bars draw from the same eleven-color palette — **Slate**, **Blue**,
 apart at a glance. The active border color comes from its own twelve-color
 accent palette — **Green**, **Cyan**, **Yellow**, **Magenta**, **Blue**,
 **Lime**, **Amber**, **Orange**, **Red**, **Pink**, **Purple**, and **White** —
-and paints both the active pane's border and its tab in the status bar. Color
-rows preview their choice on the value chip, so a bar or accent can be judged
-before the page is closed. The default caret is a steady block; turn
-**Cursor blink** on for the 500 ms blink cycle. **Cursor shape** uses the host
-terminal's native DECSCUSR caret — steady block, underline, or bar — so the
-underlying pane text stays visible. qmm toggles that caret's visibility for
-blinking, keeping its rate independent of pane output and frame rate.
-Applications still control cursor visibility; their own DECSCUSR style
-requests are ignored. Terminals without DECSCUSR fall back to their default
-cursor shape.
+and paints both the active pane's border and its tab in the status bar. Some
+names appear in both palettes: a bar color is a dark background, an accent a
+bright highlight, and the settings page previews each choice on its value chip
+so the difference is visible before the page is closed. The default caret is a
+steady block; turn **Cursor blink** on for the 500 ms blink cycle.
+**Cursor shape** uses the host terminal's native DECSCUSR caret — steady block,
+underline, or bar — so the underlying pane text stays visible. qmm toggles that
+caret's visibility for blinking, keeping its rate independent of pane output
+and frame rate. Applications still control cursor visibility; their own
+DECSCUSR style requests are ignored. Terminals without DECSCUSR fall back to
+their default cursor shape.
 
 Values are shared by all attached clients for the server's lifetime and are
 saved immediately to `$XDG_CONFIG_HOME/qmm/config.toml` (or

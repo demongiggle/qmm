@@ -49,7 +49,9 @@ var (
 	// Every entry is a bright shade so the dark bold tab label stays readable
 	// when the accent becomes a background. The first four names are the
 	// palette's original choices, and configs saved by older builds may still
-	// refer to them.
+	// refer to them. Some names also appear in the status-bar palette below,
+	// but there they are dark backgrounds: the settings page previews the chip
+	// so a name is never the only cue.
 	accentColorNames = []string{
 		"Green", "Cyan", "Yellow", "Magenta", "Blue", "Lime",
 		"Amber", "Orange", "Red", "Pink", "Purple", "White",
@@ -60,6 +62,8 @@ var (
 	// and the copy-mode status line, so both can be tuned from one palette.
 	// Every entry is dark with light text; Slate reproduces the classic grey
 	// bar, and Blue is the copy default so the two bars differ out of the box.
+	// Names shared with the accent palette above are darker shades here, since
+	// these colors are backgrounds rather than highlights.
 	statusBarNames = []string{
 		"Slate", "Blue", "Navy", "Teal", "Green", "Olive",
 		"Amber", "Orange", "Red", "Purple", "Magenta",
@@ -269,15 +273,16 @@ func (st *settingsState) showClock() bool {
 }
 
 // borderColor is the accent that marks the active pane: its border, and its
-// tab in the session status bar.
+// tab in the session status bar. The default is the accent palette's first
+// entry, so both stay in step.
 func (st *settingsState) borderColor() int32 {
 	def, ok := settingByID(settingBorderColor)
 	if !ok {
-		return int32(colBorderActive)
+		return accentColorCodes[0]
 	}
 	idx := st.index(def)
 	if idx < 0 || idx >= len(accentColorCodes) {
-		return int32(colBorderActive)
+		return accentColorCodes[0]
 	}
 	return accentColorCodes[idx]
 }
