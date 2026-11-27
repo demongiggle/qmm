@@ -224,10 +224,11 @@ to close it. The menu is local to the attached client.
 `Ctrl-r` to reload external config edits, or `q`, `Esc`, `Ctrl-c`, `s`, or
 `Ctrl-a` `s` to close.
 
-Tune ten values: the status clock, active border color, cursor shape
+Tune eleven values: the status clock, active border color, cursor shape
 (`Block`, `Underline`, or `Bar`), cursor blink, pane-number timeout,
 double-click zoom, keyboard resize step, automatic window names, shutdown
-confirmation, and the copy-selection key. The default caret is a steady block; turn **Cursor blink** on for
+confirmation, the copy status line color, and the copy-selection key. The
+default caret is a steady block; turn **Cursor blink** on for
 the 500 ms blink cycle. **Cursor shape** uses the host terminal's native
 DECSCUSR caret — steady block, underline, or bar — so the underlying pane text
 stays visible. qmm toggles that caret's visibility for blinking, keeping its
@@ -250,17 +251,18 @@ client.
 
 `Ctrl-a` `[` opens copy mode inside the active pane: a view of that pane's
 scrollback (2,000 lines per pane) plus its current screen, drawn in the pane's
-own rectangle. The other panes, dividers and status bar stay visible and live,
-and the view follows the pane when the layout changes. Movement is vim-style,
-and the view belongs only to the attached client that opened it — other clients
-keep using the pane as usual. Copy mode is modal for the keyboard: keys drive
-the view, and `Esc`, `q`, or `Ctrl-c` (with no selection) leave it. Copy the
-selection with the configured copy key (`Ctrl-Y` by default; see
+own rectangle. The other panes and dividers stay visible and live, and the view
+follows the pane when the layout changes. Instead of stacking a second status
+line under the pane, the copy status line takes over the bottom status-bar row
+in its own color, so the pane keeps every row for scrollback. Movement is
+vim-style, and the view belongs only to the attached client that opened it —
+other clients keep using the pane as usual. Copy mode is modal for the keyboard:
+keys drive the view, and `Esc`, `q`, or `Ctrl-c` (with no selection) leave it.
+Copy the selection with the configured copy key (`Ctrl-Y` by default; see
 [settings](#help-and-settings-right-where-you-work)), or with `y` or `Enter`;
 `Ctrl-c` copies while a `v`/`V`/`Ctrl-v` selection is active. A drag that leaves
 the pane still extends the selection, clamped to the pane's edges; clicking
-another pane, a status-bar tab, or a divider leaves copy mode and performs that
-click.
+another pane or a divider leaves copy mode and performs that click.
 
 Dragging over text with the mouse selects it without entering copy mode; see
 [Mouse shortcuts](#mouse-shortcuts). The selection highlight stays visible
@@ -290,7 +292,10 @@ them. If copies seem to do nothing, use `y`, `Enter`, or `Ctrl-c` with an
 active keyboard selection, or pick another key — a mouse selection copies with
 the configured key only, since every other key belongs to the pane. The
 [terminal copy-key investigation](docs/investigations/terminal-copy-keys-2026.md)
-has the details and the per-terminal workarounds.
+has the details and the per-terminal workarounds. The copy status line color
+(**Status line color** in the settings page, or `status_line_color` under
+`[copy]`) defaults to **Blue** — deliberately unlike the grey session bar, so
+the two lines are never confused.
 
 Motions accept a numeric prefix (`10j`, `3w`), and the view follows the
 cursor. `y` with no active selection copies the current line. Copied text goes

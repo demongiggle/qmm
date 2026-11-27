@@ -150,6 +150,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			setCell(start+i, rows/2, r, colTooSmall, colDefault, protocol.StyleBold)
 		}
 		frame.CursorVisible = false
+		if c.copyMode != nil && c.copyMode.open {
+			c.drawCopyStatusBar(setCell, opts, cols, rows, c.copyMode)
+		}
 		return render()
 	}
 
@@ -286,7 +289,14 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		}
 	}
 
-	c.drawStatusBar(&frame, setCell, s, opts, cols, rows)
+	// The copy status line covers the session bar instead of stacking a second
+	// status line under the split layout, so the copy view keeps the pane's full
+	// height and the tabs/clock make way for the copy state.
+	if c.copyMode != nil && c.copyMode.open {
+		c.drawCopyStatusBar(setCell, opts, cols, rows, c.copyMode)
+	} else {
+		c.drawStatusBar(&frame, setCell, s, opts, cols, rows)
+	}
 
 	return render()
 }

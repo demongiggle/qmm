@@ -50,7 +50,8 @@ type sessionConfig struct {
 }
 
 type copyConfig struct {
-	CopyKey string `toml:"copy_key"`
+	StatusLineColor string `toml:"status_line_color"`
+	CopyKey         string `toml:"copy_key"`
 }
 
 type configSetting struct {
@@ -102,7 +103,8 @@ func configFromSettings(st *settingsState) fileConfig {
 			ConfirmShutdown: settingText(st, settingConfirmShutdown),
 		},
 		Copy: copyConfig{
-			CopyKey: settingText(st, settingCopyKey),
+			StatusLineColor: settingText(st, settingCopyStatusColor),
+			CopyKey:         settingText(st, settingCopyKey),
 		},
 	}
 }
@@ -118,6 +120,7 @@ func (fc fileConfig) orderedSettings() []configSetting {
 		{settingResizeStep, fc.Layout.KeyboardResizeStep},
 		{settingAutoNameWindows, fc.Layout.AutomaticWindowNames},
 		{settingConfirmShutdown, fc.Session.ConfirmShutdown},
+		{settingCopyStatusColor, fc.Copy.StatusLineColor},
 		{settingCopyKey, fc.Copy.CopyKey},
 	}
 }

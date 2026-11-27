@@ -48,7 +48,7 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	for _, key := range []string{
 		"status_bar_clock", "active_pane_border", "cursor_shape", "cursor_blink",
 		"pane_number_timeout", "double_click_zoom", "keyboard_resize_step",
-		"automatic_window_names", "confirm_shutdown", "copy_key",
+		"automatic_window_names", "confirm_shutdown", "status_line_color", "copy_key",
 	} {
 		if !strings.Contains(string(raw), key) {
 			t.Errorf("default config missing key %q:\n%s", key, raw)
@@ -58,7 +58,8 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	st.setByID(settingCursorShape, 2)
 	st.setByID(settingCursorBlink, 0)
 	st.setByID(settingBorderColor, 1)
-	st.setByID(settingCopyKey, 1) // Ctrl-Shift-X, away from the Ctrl-Y default
+	st.setByID(settingCopyKey, 1)         // Ctrl-Shift-X, away from the Ctrl-Y default
+	st.setByID(settingCopyStatusColor, 2) // Green, away from the Blue default
 	if err := writeConfig(path, &st); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -74,6 +75,9 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	}
 	if loaded.borderColor() != 39 {
 		t.Fatalf("loaded border color = %d, want cyan 39", loaded.borderColor())
+	}
+	if got, want := loaded.copyStatusStyle(), copyStatusPalette[2]; got != want {
+		t.Fatalf("loaded copy status style = %+v, want %+v", got, want)
 	}
 }
 

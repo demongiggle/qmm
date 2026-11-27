@@ -209,15 +209,23 @@ func TestCopyModeViewIsPerClientAndHidesCursor(t *testing.T) {
 	if f.CursorVisible {
 		t.Error("copy mode should hide its pane's native cursor")
 	}
-	if len(f.Panes) != 2 || len(f.Splitters) != 1 || len(f.Tabs) == 0 {
-		t.Error("copy mode should keep the pane layout, borders and status tabs")
+	if len(f.Panes) != 2 || len(f.Splitters) != 1 {
+		t.Error("copy mode should keep the pane layout and borders")
+	}
+	if len(f.Tabs) != 0 {
+		t.Error("the copy status line should cover the session status bar tabs")
 	}
 	text := frameText(f)
 	if !strings.Contains(text, "hello copy mode") || !strings.Contains(text, "[copy mode]") {
 		t.Fatalf("copy mode frame missing content/hint:\n%s", text)
 	}
-	if strings.Contains(frameText(*c2.frame), "[copy mode]") {
+	// The other client still sees the ordinary session status bar.
+	other := *c2.frame
+	if strings.Contains(frameText(other), "[copy mode]") {
 		t.Error("copy mode overlay leaked to another client")
+	}
+	if len(other.Tabs) == 0 || !strings.Contains(frameText(other), "0:zsh*") {
+		t.Error("another client lost its status bar while copy mode is open")
 	}
 }
 
@@ -259,28 +267,61 @@ func TestCopyModeStaysInsideItsPane(t *testing.T) {
 	if got := rectText(f, rects[2]); !strings.Contains(got, "PANE-TWO") {
 		t.Fatalf("copy mode hid the other pane:\n%s", got)
 	}
-	// The copy view covers only its own pane, status row included.
+	// The copy view fills only its own pane: no status line is stacked inside
+	// it, so the pane keeps every row for scrollback.
 	paneText := rectText(f, rects[1])
-	if !strings.Contains(paneText, "PANE-ONE") || !strings.Contains(paneText, "[copy mode]") {
-		t.Fatalf("copy pane missing snapshot/hint:\n%s", paneText)
+	if !strings.Contains(paneText, "PANE-ONE") {
+		t.Fatalf("copy pane missing its snapshot:\n%s", paneText)
 	}
-	statusY := rects[1].Bottom() - 1
-	if got := cellAt(f, rects[1].Right()-1, statusY).BG; got != colCopyStatusBG {
-		t.Fatalf("copy status row background = %d, want %d", got, colCopyStatusBG)
-	}
-	if got := cellAt(f, rects[1].Right(), statusY).BG; got == colCopyStatusBG {
-		t.Fatal("copy status row painted over the pane border")
-	}
-	if got := cellAt(f, rects[2].X, statusY).BG; got == colCopyStatusBG {
-		t.Fatal("copy status row painted over the other pane")
+	if strings.Contains(paneText, "[copy mode]") {
+		t.Fatalf("copy status line stacked inside the pane:\n%s", paneText)
 	}
 	if got := rectText(f, rects[2]); strings.Contains(got, "copy mode") {
 		t.Fatalf("copy status leaked into the other pane:\n%s", got)
 	}
-	// The session status bar is still there, with its window tab.
-	bar := rectText(f, layout.Rect{Y: 23, W: 80, H: 1})
-	if !strings.Contains(bar, "0:zsh*") {
-		t.Fatalf("copy mode hid the status bar:\n%s", bar)
+
+	// The copy status line covers the session bar on the last row and uses a
+	// different palette, so the two status lines never stack.
+	barY := 23
+	bar := rectText(f, layout.Rect{Y: barY, W: 80, H: 1})
+	if !strings.Contains(bar, "[copy mode]") {
+		t.Fatalf("copy status line missing from the session bar row:\n%s", bar)
+	}
+	if strings.Contains(bar, "0:zsh*") {
+		t.Fatalf("session tabs survived under the copy status line:\n%s", bar)
+	}
+	if got := cellAt(f, 0, barY).BG; got != colCopyStatusBG {
+		t.Fatalf("copy status background = %d, want %d", got, colCopyStatusBG)
+	}
+	if got := cellAt(f, 79, barY).BG; got != colCopyStatusBG {
+		t.Fatalf("copy status line does not span the row: BG at col 79 = %d", got)
+	}
+	if colCopyStatusBG == colBarBG {
+		t.Fatal("copy and session status lines share a background color")
+	}
+	if len(f.Tabs) != 0 {
+		t.Error("the covered session bar should not keep tab hit zones")
+	}
+}
+
+func TestCopyStatusLineColorSetting(t *testing.T) {
+	s, c, _ := newCopyModeFixture(80, 24, []copyLine{lineOf("hello")})
+	s.broadcast()
+	barY := 23
+	if got := cellAt(*c.frame, 0, barY).BG; got == colBarBG {
+		t.Fatalf("default copy status background = session bar %d", got)
+	}
+	if got, want := cellAt(*c.frame, 0, barY).BG, copyStatusPalette[0].bg; got != want {
+		t.Fatalf("default copy status background = %d, want %d", got, want)
+	}
+
+	s.sess.opts().setByID(settingCopyStatusColor, 2)
+	s.broadcast()
+	if got, want := cellAt(*c.frame, 0, barY).BG, copyStatusPalette[2].bg; got != want {
+		t.Fatalf("copy status background = %d, want configured %d", got, want)
+	}
+	if got, want := cellAt(*c.frame, 1, barY).FG, copyStatusPalette[2].key; got != want {
+		t.Fatalf("copy status label FG = %d, want %d", got, want)
 	}
 }
 

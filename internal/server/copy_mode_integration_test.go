@@ -280,26 +280,26 @@ func TestCopyModeStaysInsideItsPaneIntegration(t *testing.T) {
 	if active.W == 0 || active.W >= f.Cols {
 		t.Fatalf("active pane rect = %+v, want one split pane", active)
 	}
-	if len(f.Tabs) == 0 {
-		t.Fatalf("copy mode hid the status bar tabs:\n%s", text)
-	}
-	// The copy status line sits on the focused pane's bottom row, to the
-	// right of the divider -- never across the whole terminal.
-	rowText := func(x0, x1, y int) string {
+	// The copy status line covers the session status bar, so it spans the whole
+	// bottom row and the normal tabs are hidden under it.
+	rowText := func(y int) string {
 		var sb strings.Builder
-		for x := x0; x < x1; x++ {
+		for x := 0; x < f.Cols; x++ {
 			sb.WriteRune(cellAt(f, x, y).Ch)
 		}
 		return sb.String()
 	}
-	statusY := active.Y + active.H - 1
-	if got := rowText(active.X, active.X+active.W, statusY); !strings.Contains(got, "[copy mode]") {
-		t.Fatalf("copy status missing from the focused pane row %d: %q", statusY, got)
+	bar := rowText(f.Rows - 1)
+	if !strings.Contains(bar, "[copy mode]") {
+		t.Fatalf("copy status missing from the session bar row: %q", bar)
 	}
-	if got := rowText(0, active.X, statusY); strings.Contains(got, "[copy mode]") {
-		t.Fatalf("copy status painted left of the focused pane: %q", got)
+	if len(f.Tabs) != 0 {
+		t.Fatalf("session tabs survived under the copy status line: %+v", f.Tabs)
 	}
-	if got := rowText(0, f.Cols, f.Rows-1); strings.Contains(got, "[copy mode]") {
-		t.Fatalf("copy status replaced the session status bar: %q", got)
+	// The focused pane keeps all of its rows for scrollback -- no stacked
+	// status line inside it.
+	paneRow := rowText(active.Y + active.H - 1)
+	if strings.Contains(paneRow, "[copy mode]") {
+		t.Fatalf("copy status stacked inside the pane: %q", paneRow)
 	}
 }

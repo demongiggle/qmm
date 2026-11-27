@@ -28,14 +28,34 @@ const (
 	settingResizeStep      settingID = "resize_step"
 	settingAutoNameWindows settingID = "auto_name_windows"
 	settingConfirmShutdown settingID = "confirm_shutdown"
+	settingCopyStatusColor settingID = "copy_status_color"
 	settingCopyKey         settingID = "copy_key"
 )
+
+// statusLineStyle is the palette of the copy-mode status line that covers the
+// session status bar.
+type statusLineStyle struct {
+	bg  int32 // line background
+	fg  int32 // hint text
+	key int32 // label text
+}
 
 var (
 	onOffValues = []string{"On", "Off"}
 
 	borderColorNames = []string{"Green", "Cyan", "Yellow", "Magenta"}
 	borderColorCodes = []int32{46, 39, 226, 201}
+
+	// copyStatusPalette colors the copy-mode status line that replaces the
+	// session status bar. The shades are deliberately far from the session
+	// bar's grey so the two lines are never mistaken for each other.
+	copyStatusNames   = []string{"Blue", "Purple", "Green", "Amber"}
+	copyStatusPalette = []statusLineStyle{
+		{bg: colCopyStatusBG, fg: colCopyStatusFG, key: colCopyStatusKey},
+		{bg: 54, fg: 250, key: 219},
+		{bg: 22, fg: 250, key: 157},
+		{bg: 94, fg: 250, key: 228},
+	}
 
 	cursorShapeNames = []string{"Block", "Underline", "Bar"}
 	cursorShapeCodes = []uint8{
@@ -105,6 +125,7 @@ var settingsSections = []settingsSection{
 	{
 		Title: "Copy mode",
 		Options: []settingDef{
+			{ID: settingCopyStatusColor, Label: "Status line color", Values: copyStatusNames, Default: 0},
 			{ID: settingCopyKey, Label: "Copy selection key", Values: copyKeyNames, Default: 0},
 		},
 	},
@@ -292,6 +313,18 @@ func (st *settingsState) autoNameWindows() bool {
 
 func (st *settingsState) confirmShutdown() bool {
 	return st.boolSetting(settingConfirmShutdown, true)
+}
+
+func (st *settingsState) copyStatusStyle() statusLineStyle {
+	def, ok := settingByID(settingCopyStatusColor)
+	if !ok {
+		return copyStatusPalette[0]
+	}
+	idx := st.index(def)
+	if idx < 0 || idx >= len(copyStatusPalette) {
+		return copyStatusPalette[0]
+	}
+	return copyStatusPalette[idx]
 }
 
 func settingsOptionCount() int {

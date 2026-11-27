@@ -17,9 +17,12 @@ const (
 	colCopySelectionFG int32 = 231
 	colCopyCursorBG    int32 = 46
 	colCopyCursorFG    int32 = 16
-	colCopyStatusBG    int32 = 236
-	colCopyStatusFG    int32 = 248
-	colCopyStatusKey   int32 = 46
+	// Default palette of the copy-mode status line. It replaces the session
+	// status bar (grey 236), so its blue background is deliberately distinct;
+	// the settings page can pick another palette.
+	colCopyStatusBG  int32 = 24
+	colCopyStatusFG  int32 = 250
+	colCopyStatusKey int32 = 195
 
 	// OSC 52 payloads are capped so a huge selection cannot flood the
 	// client's terminal with an enormous escape sequence.
@@ -74,11 +77,14 @@ type copyModeState struct {
 	lastSearchBack bool
 }
 
+// viewRows is how many scrollback lines the pane shows. The copy status line
+// covers the session status bar instead of the pane's last row, so the view
+// keeps the pane's full height.
 func (st *copyModeState) viewRows() int {
-	if st.rect.H < 2 {
+	if st.rect.H < 1 {
 		return 1
 	}
-	return st.rect.H - 1
+	return st.rect.H
 }
 
 // covers reports whether the copy view is drawn at (x, y).
@@ -510,10 +516,9 @@ func (s *Server) closeCopyMode(c *clientConn) {
 }
 
 // scrToBuffer maps screen cell coordinates onto the copy-mode buffer. The copy
-// view draws viewRows lines inside the pane rect, and the pane's last row is
-// the status row. Columns are clamped to the line length; points outside the
-// pane clamp to its edges so a drag that leaves the pane keeps extending the
-// selection.
+// view fills the pane rect line for line. Columns are clamped to the line
+// length; points outside the pane clamp to its edges so a drag that leaves the
+// pane keeps extending the selection.
 func (st *copyModeState) scrToBuffer(x, y int) copyPoint {
 	viewRows := st.viewRows()
 	row := clampInt(y-st.rect.Y, 0, viewRows-1)
@@ -876,15 +881,14 @@ func (c *compositor) copyModeCovers(paneID int) bool {
 }
 
 // drawCopyMode paints the copy view into its pane's rect. Everything outside
-// the rect (other panes, borders, the status bar) stays as composed, so the
+// the rect (other panes, borders, the bar row) stays as composed, so the
 // session layout remains visible while one pane shows its scrollback.
 func (c *compositor) drawCopyMode(setCell helpSetCell, st *copyModeState) {
 	r := st.rect
 	if r.W < 1 || r.H < 1 {
 		return
 	}
-	viewRows := st.viewRows()
-	for y := 0; y < viewRows && y < r.H; y++ {
+	for y := 0; y < st.viewRows(); y++ {
 		idx := st.top + y
 		line := copyLine{}
 		if idx >= 0 && idx < len(st.lines) {
@@ -900,16 +904,22 @@ func (c *compositor) drawCopyMode(setCell helpSetCell, st *copyModeState) {
 			return 0, 0, 0, false
 		})
 	}
+}
 
-	// The status line takes the pane's bottom row; a one-row pane has no room
-	// for it, so the view keeps the whole rect.
-	if r.H < 2 {
+// drawCopyStatusBar paints the copy-mode status line over the session status
+// bar. Covering the bar keeps the pane's last row for scrollback and makes the
+// copy state obvious: the line uses its own configurable palette instead of
+// the session tabs and clock.
+func (c *compositor) drawCopyStatusBar(setCell helpSetCell, opts *settingsState, cols, rows int, st *copyModeState) {
+	if cols < 1 || rows < 1 {
 		return
 	}
-	statusY := r.Bottom() - 1
-	for x := 0; x < r.W; x++ {
-		setCell(r.X+x, statusY, ' ', colCopyStatusFG, colCopyStatusBG, 0)
+	style := opts.copyStatusStyle()
+	y := rows - 1
+	for x := 0; x < cols; x++ {
+		setCell(x, y, ' ', style.fg, style.bg, 0)
 	}
+
 	var label string
 	switch {
 	case st.searchActive:
@@ -928,14 +938,19 @@ func (c *compositor) drawCopyMode(setCell helpSetCell, st *copyModeState) {
 		label = fmt.Sprintf(" [copy mode]  line %d/%d  col %d", st.cursor.line+1, len(st.lines), st.cursor.col+1)
 	}
 	hint := "  q quit  y copy  v select  / search"
-	if len([]rune(label))+len([]rune(hint)) > r.W {
+	if len([]rune(label))+len([]rune(hint)) > cols {
 		hint = ""
 	}
-	runes := []rune(label + hint)
-	for i, ch := range runes {
-		if i >= r.W {
-			break
+	x := 0
+	put := func(text string, fg int32) {
+		for _, ch := range text {
+			if x >= cols {
+				return
+			}
+			setCell(x, y, ch, fg, style.bg, 0)
+			x++
 		}
-		setCell(r.X+i, statusY, ch, colCopyStatusKey, colCopyStatusBG, 0)
 	}
+	put(label, style.key)
+	put(hint, style.fg)
 }

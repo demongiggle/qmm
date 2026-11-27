@@ -32,7 +32,8 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 		"Status bar clock", "Active pane border", "Cursor shape", "Cursor blink",
 		"Pane number timeout", "Double-click zoom", "Keyboard resize step",
 		"Automatic window names", "Confirm shutdown", "[On]", "[Green]",
-		"[Block]", "[Off]", "[2s]", "[2 cells]", "r reload", "q/Esc close",
+		"[Block]", "[Off]", "[2s]", "[2 cells]", "Copy mode", "Status line color",
+		"[Blue]", "r reload", "q close",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("settings frame missing %q:\n%s", want, text)
@@ -116,7 +117,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 		t.Fatalf("End scroll top = %d, want %d", c.settingsTop, maxTop)
 	}
 	text = frameText(*c.frame)
-	for _, want := range []string{"Session", "Confirm shutdown"} {
+	for _, want := range []string{"Copy mode", "Copy selection key"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("scrolled settings frame missing %q:\n%s", want, text)
 		}
