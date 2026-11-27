@@ -135,6 +135,13 @@ type clientConn struct {
 	displayPanesInput    string
 	displayPanesDeadline time.Time
 
+	// prefix+0..9 jumps to a numbered window. The input buffer stays open
+	// while the number is a prefix of a longer existing window index, so
+	// prefix+1 then 0 reaches window 10.
+	windowGotoOpen     bool
+	windowGotoInput    string
+	windowGotoDeadline time.Time
+
 	// prefix+s opens a categorized settings page. Option values are shared,
 	// but the cursor and scroll position are local to this client.
 	settingsOpen   bool
@@ -236,8 +243,8 @@ func Run(cfg Config) error {
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	displayTicker := time.NewTicker(displayPanesExpireInterval)
-	defer displayTicker.Stop()
+	expireTicker := time.NewTicker(displayPanesExpireInterval)
+	defer expireTicker.Stop()
 
 	for {
 		var shutdown bool
@@ -259,8 +266,9 @@ func Run(cfg Config) error {
 		case <-ticker.C:
 			s.refreshWindowNames()
 			s.broadcast()
-		case <-displayTicker.C:
+		case <-expireTicker.C:
 			s.expireDisplayPanes()
+			s.expireWindowGoto()
 		}
 		if shutdown {
 			s.teardown("session ended")

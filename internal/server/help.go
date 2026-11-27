@@ -38,6 +38,7 @@ var helpSections = []helpSection{
 		Title: "Windows",
 		Items: []helpItem{
 			{"C-a c", "New window"},
+			{"C-a 0-9", "Go to window number"},
 			{"C-a n / p", "Next / previous"},
 			{"C-a l", "Last window"},
 		},
@@ -251,6 +252,11 @@ func trimHelpBlock(lines []helpLine) []helpLine {
 // is not reserved when the block lands last in its column (trimHelpBlock
 // drops it there); reserving it would waste the final content row.
 func packHelpBlocks(blocks [][]helpLine, count, maxRows int) ([][]helpLine, bool) {
+	if count == 2 {
+		if columns, ok := packHelpBlocksOrdered(blocks, maxRows); ok {
+			return columns, true
+		}
+	}
 	columns := make([][]helpLine, count)
 	sizes := make([]int, count)
 	for _, block := range blocks {
@@ -275,6 +281,42 @@ func packHelpBlocks(blocks [][]helpLine, count, maxRows int) ([][]helpLine, bool
 		sizes[best] += need
 	}
 	return columns, true
+}
+
+// packHelpBlocksOrdered splits the sections at a boundary so both columns keep
+// the natural reading order. The least-filled heuristic below can interleave
+// sections and leave the last one a row over even when an ordered split fits.
+func packHelpBlocksOrdered(blocks [][]helpLine, maxRows int) ([][]helpLine, bool) {
+	sizes := make([]int, len(blocks))
+	total := 0
+	for i, block := range blocks {
+		sizes[i] = len(trimHelpBlock(block))
+		total += sizes[i]
+	}
+	left := 0
+	for split := 1; split < len(blocks); split++ {
+		left += sizes[split-1]
+		leftRows := left + split - 1
+		rightRows := total - left + len(blocks) - split - 1
+		if leftRows > maxRows || rightRows > maxRows {
+			continue
+		}
+		return [][]helpLine{
+			appendHelpBlocks(nil, blocks[:split]),
+			appendHelpBlocks(nil, blocks[split:]),
+		}, true
+	}
+	return nil, false
+}
+
+func appendHelpBlocks(dst []helpLine, blocks [][]helpLine) []helpLine {
+	for _, block := range blocks {
+		if len(dst) > 0 {
+			dst = append(dst, helpLine{blank: true})
+		}
+		dst = append(dst, trimHelpBlock(block)...)
+	}
+	return dst
 }
 
 func flattenHelpBlocks(blocks [][]helpLine) []helpLine {

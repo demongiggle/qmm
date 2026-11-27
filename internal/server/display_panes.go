@@ -13,9 +13,10 @@ const (
 	// displayPanesTimeout is long enough to read the badges and press a
 	// number, but short enough that the overlay disappears on its own.
 	displayPanesTimeout = 2 * time.Second
-	// displayPanesDigitTimeout extends the overlay briefly after an
-	// ambiguous first digit, so pane 10 can be entered as "10".
-	displayPanesDigitTimeout = time.Second
+	// ambiguousDigitTimeout extends numeric input briefly after an ambiguous
+	// first digit, so pane 10 can be entered as "10" and window 10 as
+	// prefix+1 followed by 0.
+	ambiguousDigitTimeout = time.Second
 	// displayPanesExpireInterval bounds how late an expired overlay can
 	// linger on screen. The event loop only inspects state, never renders
 	// from a timer goroutine.
@@ -195,7 +196,7 @@ func (s *Server) refreshDisplayPanesDeadline(c *clientConn) {
 	if c.displayPanesInput == "" {
 		c.displayPanesDeadline = time.Now().Add(s.sess.opts().paneNumberTimeoutDuration())
 	} else {
-		c.displayPanesDeadline = time.Now().Add(displayPanesDigitTimeout)
+		c.displayPanesDeadline = time.Now().Add(ambiguousDigitTimeout)
 	}
 	c.forceFull = true
 	s.broadcast()

@@ -114,6 +114,16 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 			return false
 		}
 	}
+	// While a numeric window jump is pending, mouse/action messages cancel it
+	// instead of switching focus or windows underneath the typed number.
+	if c.windowGotoOpen {
+		switch in.msg.(type) {
+		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
+		default:
+			s.closeWindowGoto(c)
+			return false
+		}
+	}
 	// While help is open, mouse/action messages dismiss the overlay instead
 	// of reaching the panes underneath. Input and control messages are
 	// handled below.
@@ -555,6 +565,18 @@ var prefixBindings = []prefixBinding{
 	repeatableResizeBind("\x1b[5D", protocol.DirLeft),
 }
 
+// Digits jump to a window by its status-bar number. When the digit could start
+// a longer existing index, the jump waits for the next digit or a short timeout
+// (see window_goto.go), mirroring prefix+q's pane-number input.
+func init() {
+	for d := '0'; d <= '9'; d++ {
+		digit := int(d - '0')
+		prefixBindings = append(prefixBindings, prefixBind(string(d), func(s *Server, c *clientConn) {
+			s.openWindowGoto(c, digit)
+		}))
+	}
+}
+
 func (s *Server) writeRaw(c *clientConn, data []byte) {
 	p := s.sess.activePane()
 	if p == nil {
@@ -672,6 +694,11 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 		s.handleHelpInput(c, data)
 		return
 	}
+	// A pending numeric window jump owns the next digits; a stale one commits
+	// before ordinary input resumes.
+	if c.windowGotoOpen && s.windowGotoExpired(c) {
+		s.commitWindowGoto(c)
+	}
 	if c.repeatExpired() {
 		c.clearRepeat()
 	}
@@ -685,6 +712,14 @@ func (s *Server) handleInput(c *clientConn, data []byte) {
 	}
 	for i := 0; i < len(data); i++ {
 		b := data[i]
+		if c.windowGotoOpen {
+			if s.windowGotoExpired(c) {
+				s.commitWindowGoto(c)
+				// fall through: the byte is ordinary input after the commit
+			} else if s.consumeWindowGotoInput(c, data[i:]) {
+				continue
+			}
+		}
 		if c.prefixArmed {
 			if time.Since(c.prefixAt) > prefixTimeout {
 				c.prefixArmed = false

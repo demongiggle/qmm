@@ -176,6 +176,7 @@ Your shells, windows, and layout are still there.
 | `Ctrl-a` `c` | New window |
 | `Ctrl-a` `n` / `p` | Next / previous window |
 | `Ctrl-a` `l` | Back to last window |
+| `Ctrl-a` `0`–`9` | Switch to window number (two digits wait briefly) |
 | `Ctrl-a` `o` | Cycle to next pane |
 | `Ctrl-a` `q` | Show pane numbers / jump to pane |
 | `Ctrl-a` `s` | Open categorized settings |
