@@ -522,6 +522,63 @@ func TestNewPaneAndWindowTakeFocus(t *testing.T) {
 	}
 }
 
+// TestNewWindowInheritsActivePaneCWD verifies that Ctrl-a c starts the new
+// window's shell in the active pane's current working directory.
+func TestNewWindowInheritsActivePaneCWD(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	dir := t.TempDir()
+	t.Setenv("QMM_CONFIG", dir+"/config.toml")
+	cfg := Config{SocketDir: dir}
+	sock := filepath.Join(dir, "default")
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- Run(cfg) }()
+	waitSocket(t, sock)
+
+	c := dial(t, sock, 80, 24)
+	_ = c.recv() // Welcome
+	_ = c.waitForFrame(func(f protocol.Frame) bool { return len(f.Panes) == 1 })
+
+	work, err := os.MkdirTemp("", "qmm-wd-")
+	if err != nil {
+		t.Fatalf("temp work dir: %v", err)
+	}
+	defer os.RemoveAll(work)
+	if err := c.codec.Send(protocol.Input{Data: []byte("cd " + work + " && pwd\n")}); err != nil {
+		t.Fatalf("cd: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return strings.Contains(frameText(f), work)
+	})
+
+	// The old window now has this cwd; the new window must start there too.
+	if err := c.codec.Send(protocol.ActionNewWindow{}); err != nil {
+		t.Fatalf("new window: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return len(f.Tabs) == 2 && f.Tabs[1].Active && len(f.Panes) == 1
+	})
+
+	if err := c.codec.Send(protocol.Input{Data: []byte("pwd\n")}); err != nil {
+		t.Fatalf("pwd: %v", err)
+	}
+	c.waitForFrame(func(f protocol.Frame) bool {
+		return strings.Contains(frameText(f), work)
+	})
+
+	if err := c.codec.Send(protocol.Shutdown{}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+}
+
 // TestPrefixArrowResize verifies that Ctrl-a Ctrl-Right resizes the active
 // pane end to end, and that held Ctrl-Right presses repeat without a prefix
 // (byte -> prefix state machine -> tree resize).

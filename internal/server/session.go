@@ -260,11 +260,12 @@ func (p *pane) kill() {
 	_ = p.ptmx.Close()
 }
 
-// newWindow creates and activates a fresh window with one pane.
+// newWindow creates and activates a fresh window with one pane. Its shell
+// starts in the active pane's working directory, matching splits.
 func (s *session) newWindow(cols, rows int) (*window, error) {
 	idx := s.lowestFreeIndex()
 	w := &window{index: idx, name: "qmm"}
-	p, err := s.spawnPane("", cols, rows)
+	p, err := s.spawnPane(s.activePaneCWD(), cols, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -460,6 +461,18 @@ func (s *session) activePane() *pane {
 	return s.panes[w.activePane]
 }
 
+// activePaneCWD returns the working directory of the active pane's foreground
+// process, or "" when it cannot be determined. New panes and windows use it so
+// they start where the user currently is.
+func (s *session) activePaneCWD() string {
+	p := s.activePane()
+	if p == nil {
+		return ""
+	}
+	_, dir := fgInfo(p)
+	return dir
+}
+
 // splitActivePane splits the active pane and focuses the new pane. dir is
 // layout.Vertical (divider vertical) or layout.Horizontal.
 func (s *session) splitActivePane(cols, rows int, dir layout.Direction) (*window, error) {
@@ -468,12 +481,7 @@ func (s *session) splitActivePane(cols, rows int, dir layout.Direction) (*window
 		return nil, fmt.Errorf("no active window")
 	}
 	// New pane starts in the same working directory as the current one.
-	src := s.panes[w.activePane]
-	dirPath := ""
-	if src != nil {
-		_, dirPath = fgInfo(src)
-	}
-	np, err := s.spawnPane(dirPath, cols, rows)
+	np, err := s.spawnPane(s.activePaneCWD(), cols, rows)
 	if err != nil {
 		return nil, err
 	}
