@@ -263,6 +263,40 @@ func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
 	}
 }
 
+func TestComposeEraseAboveRepaintsFirstLineBackground(t *testing.T) {
+	s := newTestSession()
+	p := s.panes[1]
+	comp := &compositor{}
+
+	// Initial screen with Normal background 235. The first line holds text that
+	// must disappear when the application later erases above the cursor.
+	if _, err := p.vt.Write([]byte("\x1b[m\x1b[48;5;235m\x1b[2JAAAA\r\nBBBB")); err != nil {
+		t.Fatalf("write initial screen: %v", err)
+	}
+	_ = comp.compose(s, 80, 24, true)
+
+	// The application switches to background 17, moves to the second line, and
+	// uses erase-above (CSI 1J). That must repaint the whole first line with the
+	// new background, not leave the old background behind.
+	if _, err := p.vt.Write([]byte("\x1b[48;5;17m\x1b[2;2H\x1b[1J")); err != nil {
+		t.Fatalf("write erase above: %v", err)
+	}
+	f := comp.compose(s, 80, 24, false)
+
+	for x := 0; x < 39; x++ {
+		got := cellAt(f, x, 0)
+		if got.Ch != ' ' || got.BG != 17 {
+			t.Errorf("first line cell (%d,0) = %+v, want blank with BG 17", x, got)
+		}
+	}
+	for x := 0; x < 2; x++ {
+		got := cellAt(f, x, 1)
+		if got.Ch != ' ' || got.BG != 17 {
+			t.Errorf("erased prefix cell (%d,1) = %+v, want blank with BG 17", x, got)
+		}
+	}
+}
+
 func TestComposePreservesBackgroundOnVimLineScroll(t *testing.T) {
 	s := newTestSession()
 	p := s.panes[1]

@@ -63,6 +63,43 @@ func TestNewline(t *testing.T) {
 	}
 }
 
+func TestEraseAboveSecondLineClearsFirstLine(t *testing.T) {
+	term := New(WithSize(5, 3))
+	// Fill the screen with background 235 so the erase result is visible.
+	seq := "\033[m\033[48;5;235m\033[2J" +
+		"AAAA\r\nBBBB\r\nCCCC"
+	if _, err := term.Write([]byte(seq)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Switch to background 17 and erase from the start of the screen through
+	// the cursor, which sits on the second line. The first line must be erased
+	// too, not only the current line's prefix.
+	if _, err := term.Write([]byte("\033[48;5;17m\033[2;2H\033[1J")); err != nil {
+		t.Fatal(err)
+	}
+
+	for x := 0; x < 5; x++ {
+		cell := term.Cell(x, 0)
+		if cell.Char != ' ' || cell.BG != Color(17) {
+			t.Fatalf("cell(%d,0) = %+v, want blank with BG 17", x, cell)
+		}
+	}
+	for x := 0; x < 2; x++ {
+		cell := term.Cell(x, 1)
+		if cell.Char != ' ' || cell.BG != Color(17) {
+			t.Fatalf("cell(%d,1) = %+v, want erased prefix with BG 17", x, cell)
+		}
+	}
+	// Cells after the cursor and rows below the cursor are untouched.
+	if cell := term.Cell(2, 1); cell.Char != 'B' || cell.BG != Color(235) {
+		t.Fatalf("cell(2,1) = %+v, want untouched B with BG 235", cell)
+	}
+	if cell := term.Cell(0, 2); cell.Char != 'C' || cell.BG != Color(235) {
+		t.Fatalf("cell(0,2) = %+v, want untouched C with BG 235", cell)
+	}
+}
+
 func TestNewlineScrollBCE(t *testing.T) {
 	term := New(WithSize(20, 5))
 	// Set 256-color background 235 and clear screen, then scroll down one line
