@@ -410,25 +410,35 @@ func TestComposeWideGlyphRightEdgeClip(t *testing.T) {
 	}
 }
 
-// TestComposeWideGlyphCaretStaysInsidePane keeps an over-expanding caret from
-// landing on a border or a neighbor pane.
+// TestComposeWideGlyphCaretStaysInsidePane forces the compose call-site clamp:
+// the vt is 60 columns while the pane rect is 40 wide, and 30 double-width
+// runes expand the caret to column 60, which only the clamp at the compose
+// call sites can bring back into the pane.
 func TestComposeWideGlyphCaretStaysInsidePane(t *testing.T) {
-	s := newTestSession()
-	p := s.panes[1]
+	s := &session{
+		windows:    map[int]*window{},
+		panes:      map[int]*pane{},
+		nextPaneID: 3,
+		settings:   defaultSettings(),
+	}
+	tree := layout.New(1)
+	tree.Split(1, 2, layout.Vertical)
+	s.windows[0] = &window{index: 0, tree: tree, activePane: 1, name: "zsh"}
+	s.active = 0
+	s.panes[1] = &pane{id: 1, vt: vt10x.New(vt10x.WithSize(60, 23))}
+	s.panes[2] = &pane{id: 2, vt: vt10x.New(vt10x.WithSize(60, 23))}
 	comp := &compositor{}
 
-	// 21 double-width runes in a 39-column vt expand past the 40-column pane
-	// rect; the caret must clamp instead of landing in the neighbor pane.
 	var row []rune
-	for i := 0; i < 21; i++ {
+	for i := 0; i < 30; i++ {
 		row = append(row, '日')
 	}
-	if _, err := p.vt.Write([]byte("\x1b[m\x1b[H\x1b[2J" + string(row))); err != nil {
+	if _, err := s.panes[1].vt.Write([]byte("\x1b[m\x1b[H\x1b[2J" + string(row))); err != nil {
 		t.Fatal(err)
 	}
 	f := comp.compose(s, 80, 24, true)
-	if f.CursorX > 39 {
-		t.Errorf("cursor at %d, want inside the pane (<= 39)", f.CursorX)
+	if f.CursorX != 39 {
+		t.Errorf("cursor at %d, want clamped to the pane edge (39)", f.CursorX)
 	}
 }
 
@@ -482,5 +492,27 @@ func TestSnapshotLineLayout(t *testing.T) {
 	// Copy text skips placeholders: the full line round-trips.
 	if got := row.text(); got != "日本語 A行" {
 		t.Errorf("copy text = %q, want %q", got, "日本語 A行")
+	}
+}
+
+// TestCopyLineColForRune converts a copy-text rune offset into the buffer
+// column a search must place the cursor on: placeholders widen the line past
+// the runes text() returns.
+func TestCopyLineColForRune(t *testing.T) {
+	line := copyLine{cells: []copyCell{
+		{Ch: '日', FG: 1, BG: 2},
+		{Ch: 0, FG: 1, BG: 2},
+		{Ch: 'A', FG: 1, BG: 2},
+		{Ch: ' ', FG: 1, BG: 2},
+	}}
+	if got := line.colForRune(0); got != 0 {
+		t.Errorf("colForRune(0) = %d, want 0", got)
+	}
+	if got := line.colForRune(1); got != 2 {
+		t.Errorf("colForRune(1) = %d, want 2 (A lives at column 2)", got)
+	}
+	// Past the last copyable rune; callers clamp to the line width.
+	if got := line.colForRune(5); got != len(line.cells) {
+		t.Errorf("colForRune(5) = %d, want %d", got, len(line.cells))
 	}
 }

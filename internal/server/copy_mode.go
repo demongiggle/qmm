@@ -440,7 +440,10 @@ func (st *copyModeState) findNext(reverse bool) {
 		if at < 0 {
 			continue
 		}
-		col := utf8.RuneCountInString(text[:at])
+		// The match offset is a rune index in the copy text, but cursor
+		// columns are terminal columns; placeholders widen lines past the
+		// runes text() returns, so convert before placing the cursor.
+		col := st.lines[idx].colForRune(utf8.RuneCountInString(text[:at]))
 		st.cursor = copyPoint{line: idx, col: clampInt(col, 0, st.lineLen(idx)-1)}
 		st.ensureVisible()
 		return

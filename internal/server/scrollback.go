@@ -64,6 +64,28 @@ func (l copyLine) text() string {
 	return sb.String()[:last]
 }
 
+// colForRune maps a rune index in text() back to the buffer column that rune
+// occupies. Placeholder cells widen lines past their copyable runes, so a
+// rune offset (as returned by a search in the copy text) must be converted
+// into a terminal column to position the cursor. Values past the last rune
+// map to len(cells); callers clamp.
+func (l copyLine) colForRune(n int) int {
+	if n < 0 {
+		return 0
+	}
+	count := 0
+	for i, c := range l.cells {
+		if c.Ch == 0 {
+			continue
+		}
+		if count == n {
+			return i
+		}
+		count++
+	}
+	return len(l.cells)
+}
+
 func (l copyLine) clone() copyLine {
 	cells := make([]copyCell, len(l.cells))
 	copy(cells, l.cells)
@@ -567,6 +589,18 @@ func (r *scrollback) put(ch rune) {
 	width := uniseg.StringWidth(string(ch))
 	if width < 1 {
 		width = 1
+	}
+	// A rune whose second half falls past the right edge is clipped to a
+	// plain cell, mirroring vtSnapshot and blitPane, so a line can never hold
+	// a double-width rune without its placeholder in the final column.
+	if r.x+width > r.cols {
+		ch = ' '
+		width = r.cols - r.x
+		if width < 1 {
+			r.x = r.cols - 1
+			r.wrapNext = true
+			return
+		}
 	}
 	line := r.screen[r.y]
 	for i := 0; i < width && r.x+i < r.cols; i++ {
