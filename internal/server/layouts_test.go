@@ -153,7 +153,17 @@ func TestForegroundProcessCapturesCommand(t *testing.T) {
 	})
 
 	p := &pane{id: 1, cmd: cmd, ptmx: ptmx}
-	argv, cwd, isShell := foregroundProcess(p)
+	var argv []string
+	var cwd string
+	var isShell bool
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		argv, cwd, isShell = foregroundProcess(p)
+		if len(argv) > 0 && filepath.Base(argv[0]) == "sleep" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if isShell {
 		t.Fatal("sleep detected as a shell")
 	}
