@@ -17,7 +17,6 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/demongiggle/qmm/internal/layout"
-	"github.com/demongiggle/qmm/internal/protocol"
 	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
@@ -395,85 +394,6 @@ func (s *session) newWindow(cols, rows int) (*window, error) {
 		}
 	}
 	return w, nil
-}
-
-// vtSnapshot copies the pane's current vt10x screen and cursor position.
-// Lines are expressed in terminal columns, the same space the scrollback
-// recorder uses: a double-width rune owns two cells and a zero-rune
-// placeholder marks its second half. The whole copy buffer then shares one
-// coordinate system, so a screen column maps 1:1 onto a buffer column.
-func (p *pane) vtSnapshot() ([]copyLine, int, int) {
-	p.vt.Lock()
-	defer p.vt.Unlock()
-	cols, rows := p.vt.Size()
-	cur := p.vt.Cursor()
-	out := make([]copyLine, rows)
-	for y := 0; y < rows; y++ {
-		cells := make([]copyCell, cols)
-		for i := range cells {
-			cells[i] = blankCopyCell()
-		}
-		cx := 0
-		for x := 0; x < cols && cx < cols; x++ {
-			g := p.vt.Cell(x, y)
-			ch := g.Char
-			if ch == 0 {
-				ch = ' '
-			}
-			var st uint8
-			if g.Mode&gttrBold != 0 {
-				st |= protocol.StyleBold
-			}
-			if g.Mode&gttrItalic != 0 {
-				st |= protocol.StyleItalic
-			}
-			if g.Mode&gttrUnderline != 0 {
-				st |= protocol.StyleUnderline
-			}
-			if g.Mode&gttrBlink != 0 {
-				st |= protocol.StyleBlink
-			}
-			if g.Mode&gttrReverse != 0 {
-				st |= protocol.StyleReverse
-			}
-			// A rune whose second half falls past the right edge is clipped
-			// to a plain cell, like a terminal would clip it.
-			w := vtRuneWidth(ch)
-			if cx+w > cols {
-				w = cols - cx
-				ch = ' '
-			}
-			cells[cx] = copyCell{Ch: ch, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
-			for k := 1; k < w; k++ {
-				// Placeholder: copyLine.text skips it, and the line renderer
-				// paints it as the wide rune's blank second half.
-				cells[cx+k] = copyCell{Ch: 0, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
-			}
-			cx += w
-		}
-		out[y] = copyLine{cells: cells}
-	}
-	return out, renderedCursorColumn(p.vt, cur.X, cur.Y), cur.Y
-}
-
-// renderedCursorColumn maps a vt10x cursor column onto the terminal-column
-// layout the copy buffer and the pane renderer use. vt10x advances one cell
-// per rune, so the caret must be expanded by the widths of the runes before
-// it. Callers must hold the vt lock.
-func renderedCursorColumn(vt vt10x.Terminal, col, row int) int {
-	cols, rows := vt.Size()
-	if row < 0 || row >= rows {
-		return col
-	}
-	x := 0
-	for i := 0; i < col && i < cols; i++ {
-		ch := vt.Cell(i, row).Char
-		if ch == 0 {
-			ch = ' '
-		}
-		x += vtRuneWidth(ch)
-	}
-	return clampInt(x, 0, cols-1)
 }
 
 // copyBuffer returns scrollback plus the live screen, oldest line first.

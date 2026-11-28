@@ -5,20 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/rivo/uniseg"
-
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
-	"github.com/demongiggle/qmm/internal/vt10x"
-)
-
-// vt10x glyph attribute bits (see vt10x state.go).
-const (
-	gttrReverse   = 1 << 0
-	gttrUnderline = 1 << 1
-	gttrBold      = 1 << 2
-	gttrItalic    = 1 << 4
-	gttrBlink     = 1 << 5
 )
 
 const (
@@ -389,49 +377,6 @@ func borderTouchesRect(x, y int, m uint8, r layout.Rect) bool {
 	return false
 }
 
-type vtCursor struct {
-	x, y    int
-	visible bool
-}
-
-// vtRuneWidth reports how many terminal columns a rune occupies. vt10x stores
-// one cell per rune regardless of width, and combining marks on their own
-// still have to claim a column, so anything below one counts as one.
-func vtRuneWidth(ch rune) int {
-	w := uniseg.StringWidth(string(ch))
-	if w < 1 {
-		return 1
-	}
-	return w
-}
-
-func (p *pane) vtCursor() vtCursor {
-	p.vt.Lock()
-	defer p.vt.Unlock()
-	cur := p.vt.Cursor()
-	vis := p.vt.CursorVisible()
-	// blitPane expands double-width runes into two columns, so the caret
-	// column must go through the same expansion or it lands on the wrong
-	// cell whenever the row contains wide characters.
-	return vtCursor{x: renderedCursorColumn(p.vt, cur.X, cur.Y), y: cur.Y, visible: vis}
-}
-
-// vtColor translates a vt10x color into the protocol's color encoding.
-// vt10x reserves values at and above DefaultFG for default colors, stores
-// palette indexes below 256, and stores 24-bit RGB values as 0xRRGGBB. Very
-// dark RGB values are indistinguishable from palette indexes in vt10x, so they
-// retain their palette interpretation.
-func vtColor(c vt10x.Color) int32 {
-	switch {
-	case c >= vt10x.DefaultFG:
-		return protocol.ColorDefault
-	case c <= 0xff:
-		return int32(c)
-	default:
-		return protocol.RGBColor(int32(c>>16), int32(c>>8), int32(c))
-	}
-}
-
 // blitPane copies the pane's virtual screen into the cell buffer. mapColor
 // applies the active theme to each foreground/background protocol color.
 func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pane, r layout.Rect, mapColor func(int32, bool) int32) {
@@ -439,57 +384,19 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 		mapColor = func(c int32, _ bool) int32 { return c }
 	}
 	p.vt.Lock()
+	defer p.vt.Unlock()
 	cols, rows := p.vt.Size()
 	for y := 0; y < r.H && y < rows; y++ {
-		// vt10x keeps one vt cell per rune, while the pane grid is measured in
-		// terminal columns. Double-width runes expand into two rendered cells
-		// and every later cell shifts right, so rx tracks the rendered column
-		// of the current vt cell.
-		rx := 0
-		for x := 0; x < cols && rx < r.W; x++ {
-			g := p.vt.Cell(x, y)
-			ch := g.Char
+		projectVTRow(p.vt, y, cols, r.W, func(x int, cell copyCell) {
+			// Copy buffers skip a wide glyph's continuation. A frame needs
+			// a painted space there, in the original glyph's colors.
+			ch := cell.Ch
 			if ch == 0 {
 				ch = ' '
 			}
-			fg, bg := mapColor(vtColor(g.FG), true), mapColor(vtColor(g.BG), false)
-			var st uint8
-			if g.Mode&gttrBold != 0 {
-				st |= protocol.StyleBold
-			}
-			if g.Mode&gttrItalic != 0 {
-				st |= protocol.StyleItalic
-			}
-			if g.Mode&gttrUnderline != 0 {
-				st |= protocol.StyleUnderline
-			}
-			if g.Mode&gttrBlink != 0 {
-				st |= protocol.StyleBlink
-			}
-			if g.Mode&gttrReverse != 0 {
-				st |= protocol.StyleReverse
-			}
-			w := vtRuneWidth(ch)
-			if rx+w > r.W {
-				// The rune does not fit in the pane's final column, so the
-				// rest of the row is clipped at the right edge. Keep the
-				// leftover column in the glyph's colors rather than letting a
-				// default-background cell stay behind.
-				setCell(r.X+rx, r.Y+y, ' ', fg, bg, st)
-				break
-			}
-			setCell(r.X+rx, r.Y+y, ch, fg, bg, st)
-			for k := 1; k < w; k++ {
-				// Trailing half-cells keep the glyph's colors. A plain default
-				// cell here would paint a stray gap after every double-width
-				// rune; Vim's BCE scroll leaves the background alive in that
-				// position, so it must survive blitting.
-				setCell(r.X+rx+k, r.Y+y, ' ', fg, bg, st)
-			}
-			rx += w
-		}
+			setCell(r.X+x, r.Y+y, ch, mapColor(cell.FG, true), mapColor(cell.BG, false), cell.Style)
+		})
 	}
-	p.vt.Unlock()
 }
 
 // diff compares the new grid against the previous one and returns the frame.
