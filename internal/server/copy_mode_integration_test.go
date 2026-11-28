@@ -167,19 +167,20 @@ func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
 		t.Fatal("expected Welcome")
 	}
 
-	// The PTY echoes the command before the shell executes it. Split the
-	// marker across two arguments so only actual output can start selection.
-	if err := c.codec.Send(protocol.Input{Data: []byte("printf '%s%s\\n' MOUSESEL- MARKER\n")}); err != nil {
+	// Clear the screen and put the marker on row zero. Split the marker
+	// across two arguments so the PTY's command echo cannot satisfy the wait.
+	const marker = "MOUSESEL-MARKER"
+	if err := c.codec.Send(protocol.Input{Data: []byte("printf '\\033[2J\\033[H%s%s\\n' MOUSESEL- MARKER\n")}); err != nil {
 		t.Fatalf("print marker: %v", err)
 	}
 	c.waitForScreen(func(text string) bool {
-		return strings.Contains(text, "MOUSESEL-MARKER")
+		return strings.HasPrefix(text, marker)
 	})
 
-	// Drag across the whole screen: the marker must end up inside the selection.
+	// Drag across the marker without resizing the initial 80×24 attachment.
 	for _, msg := range []interface{}{
 		protocol.ActionSelectStart{X: 0, Y: 0},
-		protocol.ActionSelectUpdate{X: 79, Y: 22},
+		protocol.ActionSelectUpdate{X: len(marker) - 1, Y: 0},
 	} {
 		if err := c.codec.Send(msg); err != nil {
 			t.Fatalf("select: %v", err)
@@ -201,8 +202,8 @@ func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
 	if !gotClip {
 		t.Fatal("copy key did not send a Clipboard message")
 	}
-	if !strings.Contains(clip.Text, "MOUSESEL-MARKER") {
-		t.Fatalf("clipboard = %q, want it to contain MOUSESEL-MARKER", clip.Text)
+	if clip.Text != marker {
+		t.Fatalf("clipboard = %q, want %q from the first row", clip.Text, marker)
 	}
 
 	// Live mode is restored: the pane receives input again.
