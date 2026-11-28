@@ -126,6 +126,10 @@ func (t *State) handleCSI() {
 				t.clear(0, 0, t.cols-1, t.cur.Y-1)
 			}
 			t.clear(0, t.cur.Y, t.cur.X, t.cur.Y)
+		case 3: // erase saved lines
+			if t.history != nil && t.mode&ModeAltScreen == 0 {
+				t.history.Clear()
+			}
 		case 2: // all
 			t.clear(0, 0, t.cols-1, t.rows-1)
 		default:
@@ -141,7 +145,7 @@ func (t *State) handleCSI() {
 			t.clear(0, t.cur.Y, t.cols-1, t.cur.Y)
 		}
 	case 'S': // SU - scroll <n> lines up
-		t.scrollUp(t.top, c.arg(0, 1))
+		t.scrollUp(c.maxarg(0, 1))
 	case 'T': // SD - scroll <n> lines down
 		t.scrollDown(t.top, c.arg(0, 1))
 	case 'L': // IL - insert <n> blank lines
