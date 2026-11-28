@@ -84,6 +84,23 @@ type Tree struct {
 	paneCount int
 }
 
+// Clone copies the tree and preserves pane and splitter IDs.
+func (t *Tree) Clone() *Tree {
+	clone := *t
+	clone.root = cloneNode(t.root)
+	return &clone
+}
+
+func cloneNode(n *node) *node {
+	if n == nil {
+		return nil
+	}
+	clone := *n
+	clone.left = cloneNode(n.left)
+	clone.right = cloneNode(n.right)
+	return &clone
+}
+
 // Spec is a serializable description of a split tree. A leaf sets Pane to its
 // index in the saved pane list; an internal node sets Split, Ratio, and exactly
 // two Children. Leaf indexes follow depth-first order, the same order as
@@ -526,35 +543,30 @@ func (t *Tree) Resize(paneID int, dir string, delta int, bounds Rect) bool {
 }
 
 // ResizeSplit adjusts an internal split directly by delta cells. Positive
-// values move the divider right/down, negative values left/up. It returns
-// false when the split does not exist.
+// values move the divider right/down, negative values left/up. It reports
+// whether the divider moved.
 func (t *Tree) ResizeSplit(splitID int, delta int, bounds Rect) bool {
 	n, r, ok := t.findSplit(t.root, splitID, bounds)
 	if !ok {
 		return false
 	}
-	var avail float64
-	var minC float64
+	avail, minCells := r.H-1, MinPaneHeight
 	if n.dir == Vertical {
-		avail = float64(r.W - 1)
-		minC = float64(MinPaneWidth)
-	} else {
-		avail = float64(r.H - 1)
-		minC = float64(MinPaneHeight)
+		avail, minCells = r.W-1, MinPaneWidth
 	}
 	if avail < 2 {
 		return false
 	}
-	dr := float64(delta) / avail
-	lo, hi := ratioBounds(avail, minC)
-	nr := n.ratio + dr
-	if nr < lo {
-		nr = lo
+	current := splitCells(avail, n.ratio, minCells)
+	minimum := 1
+	if avail >= 2*minCells {
+		minimum = minCells
 	}
-	if nr > hi {
-		nr = hi
+	move := min(max(delta, minimum-current), avail-minimum-current)
+	if move == 0 {
+		return false
 	}
-	n.ratio = nr
+	n.ratio = float64(current+move) / float64(avail)
 	return true
 }
 

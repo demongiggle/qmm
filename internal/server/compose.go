@@ -98,6 +98,10 @@ type compositor struct {
 	// selection is a mouse drag selection: a frozen snapshot of one pane that
 	// is drawn in place while the rest of the layout stays live.
 	selection *selectionState
+
+	// During a border drag, draw the proposed geometry using the live VT
+	// contents. The pane sizes are committed when the button is released.
+	dragPreview *layout.Tree
 }
 
 func blankCell(row, col int, bg int32) protocol.Cell {
@@ -190,8 +194,12 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	var haveActive bool
 
 	if w != nil {
-		rects := w.tree.Compute(area)
-		borders := w.tree.Borders(area)
+		tree := w.tree
+		if c.dragPreview != nil {
+			tree = c.dragPreview
+		}
+		rects := tree.Compute(area)
+		borders := tree.Borders(area)
 
 		for id, r := range rects {
 			p := s.panes[id]
@@ -216,6 +224,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				// A frozen snapshot has no live caret, and a copy view
 				// replaces the pane's cells with scrollback.
 				frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(id)
+				if c.dragPreview != nil && (cur.x >= r.W || cur.y >= r.H) {
+					frame.CursorVisible = false
+				}
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
 				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
