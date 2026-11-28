@@ -135,6 +135,33 @@ func TestSplitterDragProducesDeltaStream(t *testing.T) {
 	}
 }
 
+func TestHorizontalSplitterDragReleasesOutsideSharedFrame(t *testing.T) {
+	frame := testFrame(80, 24)
+	frame.Panes = []protocol.PaneRect{
+		{ID: 1, X: 0, Y: 0, W: 80, H: 11, Active: true},
+		{ID: 2, X: 0, Y: 12, W: 80, H: 11},
+	}
+	frame.Splitters = []protocol.Splitter{{ID: 42, X: 0, Y: 11, Len: 80}}
+	f := newMouseFixture(t, 100, 30, frame)
+	f.press(20, 11)
+	f.dragTo(30, 11) // Moving along the divider does not resize.
+	f.dragTo(30, 14)
+	f.release(90, 26) // Inside this terminal, outside the shared frame.
+	f.press(20, 5)
+	f.release(20, 5)
+
+	for _, want := range []any{
+		protocol.ActionDragStart{Splitter: 42},
+		protocol.ActionDragUpdate{Splitter: 42, Delta: 3},
+		protocol.ActionDragEnd{Splitter: 42},
+		protocol.ActionFocus{X: 20, Y: 5},
+	} {
+		if got := f.nextAction(); got != want {
+			t.Fatalf("mouse action = %#v, want %#v", got, want)
+		}
+	}
+}
+
 func TestPaneClickFocuses(t *testing.T) {
 	f := newMouseFixture(t, 80, 24, testFrame(80, 24))
 	f.press(60, 10) // inside the right pane

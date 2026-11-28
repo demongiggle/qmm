@@ -123,6 +123,58 @@ func TestCopyModePageScrollAndExit(t *testing.T) {
 	}
 }
 
+func TestCopyModePagePositionsAndLineMotionsAppearInStatus(t *testing.T) {
+	s, c, _ := newCopyModeFixture(80, 10, linesOf(60, "  one two %02d"))
+	for _, step := range []struct {
+		name      string
+		keys      []string
+		line, col int
+	}{
+		{"first line", []string{"g", "g"}, 1, 1},
+		{"first nonblank", []string{"^"}, 1, 3},
+		{"end of word", []string{"e"}, 1, 5},
+		{"end of next word", []string{"e"}, 1, 9},
+		{"home", []string{"\x1bOH"}, 1, 1},
+		{"full page down", []string{"\x06"}, 10, 1},
+		{"middle of page", []string{"M"}, 14, 1},
+		{"bottom of page", []string{"L"}, 18, 1},
+		{"top of page", []string{"H"}, 10, 1},
+		{"page down", []string{"\x1b[6~"}, 19, 1},
+		{"full page up", []string{"\x02"}, 10, 1},
+		{"page up", []string{"\x1b[5~"}, 1, 1},
+	} {
+		sendBehaviorInput(s, c, step.keys...)
+		want := fmt.Sprintf("line %d/60  col %d", step.line, step.col)
+		text := frameText(behaviorFrame(t, c))
+		if !strings.Contains(text, want) {
+			t.Fatalf("%s: copy status missing %q:\n%s", step.name, want, text)
+		}
+	}
+}
+
+func TestCopyModeBackwardSearchWrapsAndCanBeCancelled(t *testing.T) {
+	lines := linesOf(30, "line %02d")
+	lines[5] = lineOf("HIT hit")
+	lines[23] = lineOf("HIT hit")
+	s, c, _ := newCopyModeFixture(80, 24, lines)
+	sendBehaviorInput(s, c, "g", "g", "?", "HIT界", "\x7f", "\x1b[A", "\r")
+	for _, step := range []struct {
+		keys []string
+		want string
+	}{
+		{nil, "line 24/30  col 5"},           // Wrap backward and choose the last match.
+		{[]string{"n"}, "line 6/30  col 5"},  // Repeat in the same direction.
+		{[]string{"N"}, "line 24/30  col 1"}, // Reverse and choose the first match.
+		{[]string{"?", "unused", "\x1b"}, "line 24/30  col 1"},
+		{[]string{"n"}, "line 6/30  col 5"}, // Cancel kept the last accepted query.
+	} {
+		sendBehaviorInput(s, c, step.keys...)
+		if text := frameText(behaviorFrame(t, c)); !strings.Contains(text, step.want) {
+			t.Fatalf("search keys %q: copy status missing %q:\n%s", step.keys, step.want, text)
+		}
+	}
+}
+
 func TestCopyModeCharwiseSelectionCopiesAndPastes(t *testing.T) {
 	s, c, st := newCopyModeFixture(80, 24, []copyLine{lineOf("alpha"), lineOf("bravo")})
 	st.gotoLine(0)
