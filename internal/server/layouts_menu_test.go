@@ -20,7 +20,7 @@ func layoutsMenuFixture() []savedLayout {
 
 func TestLayoutsMenuRender(t *testing.T) {
 	sess := newTestSession()
-	var comp compositor
+	var comp clientView
 	comp.layoutsOpen = true
 	comp.layoutsList = layoutsMenuFixture()
 	comp.layoutsCursor = 0

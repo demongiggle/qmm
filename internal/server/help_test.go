@@ -123,7 +123,7 @@ func TestHelpInputScrollsAndDismisses(t *testing.T) {
 }
 
 func TestHelpOverlayClampsScrollOnSmallTerminal(t *testing.T) {
-	comp := &compositor{helpOpen: true, helpTop: 999}
+	comp := &clientView{helpOpen: true, helpTop: 999}
 	f := comp.compose(newTestSession(), 40, 10, true)
 	_, want := helpScrollMetrics(40, 10)
 	if comp.helpTop != want {

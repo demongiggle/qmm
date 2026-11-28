@@ -73,7 +73,6 @@ type Server struct {
 	shutdown  chan struct{}
 
 	needFull bool
-	comp     compositor
 
 	// pasteBuffer is the session's most recent copy. prefix+] writes it into
 	// the active pane, like tmux's default paste buffer.
@@ -116,73 +115,7 @@ type clientConn struct {
 	frame  *protocol.Frame
 	notify chan struct{}
 
-	// Border-drag state (client-initiated).
-	drag *splitterDrag
-
-	// Per-client compositor and help-menu state. Help is local to one client.
-	comp      compositor
-	helpOpen  bool
-	helpTop   int
-	forceFull bool
-
-	// Shutdown confirmation is local to the client that pressed prefix+&.
-	confirmOpen bool
-
-	// prefix+[ opens copy mode: a per-client, vim-keyed view of the active
-	// pane's scrollback with an optional selection.
-	copyMode *copyModeState
-
-	// selection is a mouse drag selection. It is not copy mode: it never
-	// captures the keyboard and never blocks other mouse actions.
-	selection *selectionState
-
-	// Config recovery warnings are local. A startup warning is shown once to
-	// the first attached client; runtime failures target their triggering
-	// client.
-	configWarning     configWarning
-	configWarningOpen bool
-
-	// prefix+q shows transient pane numbers on one client. The input buffer
-	// permits two-digit pane numbers when a window has more than ten panes.
-	displayPanesOpen     bool
-	displayPanesInput    string
-	displayPanesDeadline time.Time
-
-	// prefix+0..9 jumps to a numbered window. The input buffer stays open
-	// while the number is a prefix of a longer existing window index, so
-	// prefix+1 then 0 reaches window 10.
-	windowGotoOpen     bool
-	windowGotoInput    string
-	windowGotoDeadline time.Time
-
-	// prefix+s opens a categorized settings page. Option values are shared,
-	// but the cursor and scroll position are local to this client.
-	settingsOpen   bool
-	settingsCursor int
-	settingsTop    int
-
-	// prefix+S opens a session switcher/creator overlay local to this client.
-	sessionsOpen    bool
-	sessionsLoading bool
-	sessionsList    []protocol.SessionInfo
-	sessionsCursor  int
-	sessionsTop     int
-	sessionsNaming  bool
-	sessionsInput   string
-	sessionsError   string
-
-	// prefix+L opens a saved-layout menu local to this client. The layouts
-	// themselves are shared and persisted; only the view state is per-client.
-	layoutsOpen             bool
-	layoutsList             []savedLayout
-	layoutsCursor           int
-	layoutsTop              int
-	layoutsNaming           bool
-	layoutsInput            string
-	layoutsError            string
-	layoutsMessage          string
-	layoutsConfirmOverwrite string
-	layoutsConfirmDelete    string
+	clientView
 
 	// Prefix-key state machine.
 	prefixArmed bool
@@ -540,10 +473,6 @@ func (s *Server) broadcast() {
 		if c.drag != nil && c.drag.window != w {
 			c.drag = nil
 		}
-		c.comp.dragPreview = nil
-		if c.drag != nil {
-			c.comp.dragPreview = c.drag.preview
-		}
 		if sel := c.selection; sel != nil {
 			if rects == nil {
 				rects = s.paneRects()
@@ -553,45 +482,8 @@ func (s *Server) broadcast() {
 				c.forceFull = true
 			}
 		}
-		c.comp.helpOpen = c.helpOpen
-		c.comp.helpTop = c.helpTop
-		c.comp.confirmOpen = c.confirmOpen
-		c.comp.configWarning = c.configWarning
-		c.comp.configWarningOpen = c.configWarningOpen
-		c.comp.displayPanes = c.displayPanesOpen
-		c.comp.displayPanesInput = c.displayPanesInput
-		c.comp.settingsOpen = c.settingsOpen
-		c.comp.settingsCursor = c.settingsCursor
-		c.comp.settingsTop = c.settingsTop
-		c.comp.sessionsOpen = c.sessionsOpen
-		c.comp.sessionsLoading = c.sessionsLoading
-		c.comp.sessionsList = c.sessionsList
-		c.comp.sessionsCursor = c.sessionsCursor
-		c.comp.sessionsTop = c.sessionsTop
-		c.comp.sessionsNaming = c.sessionsNaming
-		c.comp.sessionsInput = c.sessionsInput
-		c.comp.sessionsError = c.sessionsError
-		c.comp.layoutsOpen = c.layoutsOpen
-		c.comp.layoutsList = c.layoutsList
-		c.comp.layoutsCursor = c.layoutsCursor
-		c.comp.layoutsTop = c.layoutsTop
-		c.comp.layoutsNaming = c.layoutsNaming
-		c.comp.layoutsInput = c.layoutsInput
-		c.comp.layoutsError = c.layoutsError
-		c.comp.layoutsMessage = c.layoutsMessage
-		c.comp.layoutsConfirmOverwrite = c.layoutsConfirmOverwrite
-		c.comp.layoutsConfirmDelete = c.layoutsConfirmDelete
-		c.comp.copyMode = c.copyMode
-		c.comp.selection = c.selection
-		frame := c.comp.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
+		frame := c.compose(s.sess, s.cols, s.rows, forceFull || c.forceFull)
 		c.forceFull = false
-		c.helpTop = c.comp.helpTop
-		c.settingsCursor = c.comp.settingsCursor
-		c.settingsTop = c.comp.settingsTop
-		c.sessionsCursor = c.comp.sessionsCursor
-		c.sessionsTop = c.comp.sessionsTop
-		c.layoutsCursor = c.comp.layoutsCursor
-		c.layoutsTop = c.comp.layoutsTop
 		c.enqueueFrame(frame)
 	}
 }

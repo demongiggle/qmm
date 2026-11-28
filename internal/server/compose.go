@@ -48,60 +48,17 @@ const (
 	colConfirmMuted    = colHelpMuted
 )
 
-// compositor turns session state into protocol frames and diffs successive
-// frames to produce incremental updates.
+// compositor borrows one client's view for the duration of a frame.
 type compositor struct {
+	*clientView
+	chrome chrome
+}
+
+// frameDiff retains the last grid delivered to this client's send queue.
+type frameDiff struct {
 	lastCols, lastRows int
 	last               []protocol.Cell
 	haveLast           bool
-
-	// chrome is the resolved theme palette for the frame being composed.
-	chrome chrome
-
-	helpOpen bool
-	helpTop  int
-
-	confirmOpen bool
-
-	configWarning     configWarning
-	configWarningOpen bool
-
-	displayPanes      bool
-	displayPanesInput string
-
-	settingsOpen   bool
-	settingsCursor int
-	settingsTop    int
-
-	sessionsOpen    bool
-	sessionsLoading bool
-	sessionsList    []protocol.SessionInfo
-	sessionsCursor  int
-	sessionsTop     int
-	sessionsNaming  bool
-	sessionsInput   string
-	sessionsError   string
-
-	layoutsOpen             bool
-	layoutsList             []savedLayout
-	layoutsCursor           int
-	layoutsTop              int
-	layoutsNaming           bool
-	layoutsInput            string
-	layoutsError            string
-	layoutsMessage          string
-	layoutsConfirmOverwrite string
-	layoutsConfirmDelete    string
-
-	copyMode *copyModeState
-
-	// selection is a mouse drag selection: a frozen snapshot of one pane that
-	// is drawn in place while the rest of the layout stays live.
-	selection *selectionState
-
-	// During a border drag, draw the proposed geometry using the live VT
-	// contents. The pane sizes are committed when the button is released.
-	dragPreview *layout.Tree
 }
 
 func blankCell(row, col int, bg int32) protocol.Cell {
@@ -110,9 +67,9 @@ func blankCell(row, col int, bg int32) protocol.Cell {
 
 // compose renders the current session state into a frame. It is called from
 // the server's single event loop, so session state is stable while it runs.
-func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protocol.Frame {
+func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protocol.Frame {
 	opts := s.opts()
-	c.chrome = opts.chrome()
+	c := compositor{clientView: v, chrome: opts.chrome()}
 	cells := make([]protocol.Cell, cols*rows)
 	for i := range cells {
 		cells[i] = blankCell(i/cols, i%cols, c.chrome.background)
@@ -152,7 +109,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			c.drawLayoutsMenu(&frame, setCell, cols, rows, nextLayoutName(c.layoutsList))
 		} else if c.settingsOpen {
 			c.drawSettings(&frame, setCell, cols, rows, opts)
-		} else if c.displayPanes {
+		} else if c.displayPanesOpen {
 			c.drawDisplayPanes(&frame, setCell, cols, rows, showClock)
 		}
 		// Keep pane metadata deterministic despite the layout's rect map.
@@ -167,7 +124,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			}
 			return a.ID < b.ID
 		})
-		return c.diff(cells, forceFull, frame)
+		return v.frames.diff(cells, forceFull, frame)
 	}
 
 	if cols < minCols || rows < minRows {
@@ -195,8 +152,8 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 
 	if w != nil {
 		tree := w.tree
-		if c.dragPreview != nil {
-			tree = c.dragPreview
+		if c.drag != nil && c.drag.preview != nil {
+			tree = c.drag.preview
 		}
 		rects := tree.Compute(area)
 		borders := tree.Borders(area)
@@ -224,13 +181,13 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 				// A frozen snapshot has no live caret, and a copy view
 				// replaces the pane's cells with scrollback.
 				frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(id)
-				if c.dragPreview != nil && (cur.x >= r.W || cur.y >= r.H) {
+				if c.drag != nil && c.drag.preview != nil && (cur.x >= r.W || cur.y >= r.H) {
 					frame.CursorVisible = false
 				}
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
 				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
-				Active: id == w.activePane && (!w.zoomed || c.displayPanes),
+				Active: id == w.activePane && (!w.zoomed || c.displayPanesOpen),
 			})
 		}
 
@@ -281,7 +238,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			// While pane numbers are visible, show the underlying split
 			// layout for this client instead of the floating zoom overlay.
 			// Session PTY sizes stay unchanged; the display is transient.
-			if !c.displayPanes {
+			if !c.displayPanesOpen {
 				// Zoom is a floating overlay: the split panes and their borders
 				// remain visible in a 2% margin around all four sides.
 				outer, inner := zoomRects(area.W, area.H)
@@ -539,7 +496,7 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 }
 
 // diff compares the new grid against the previous one and returns the frame.
-func (c *compositor) diff(grid []protocol.Cell, forceFull bool, frame protocol.Frame) protocol.Frame {
+func (c *frameDiff) diff(grid []protocol.Cell, forceFull bool, frame protocol.Frame) protocol.Frame {
 	cols, rows := frame.Cols, frame.Rows
 	sizeChanged := !c.haveLast || c.lastCols != cols || c.lastRows != rows || len(c.last) != len(grid)
 	full := forceFull || sizeChanged

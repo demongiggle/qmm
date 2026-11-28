@@ -161,7 +161,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 }
 
 func TestSettingsPageSkipsTooSmallTerminal(t *testing.T) {
-	f := (&compositor{settingsOpen: true}).compose(newTestSession(), 20, 5, true)
+	f := (&clientView{settingsOpen: true}).compose(newTestSession(), 20, 5, true)
 	text := frameText(f)
 	if strings.Contains(text, "QMM SETTINGS") {
 		t.Errorf("settings page covered the terminal-too-small notice:\n%s", text)
@@ -207,13 +207,13 @@ func TestSettingsViewScalesWithFutureOptions(t *testing.T) {
 
 func TestSettingsValuesAffectBehavior(t *testing.T) {
 	t.Run("status bar clock", func(t *testing.T) {
-		on := (&compositor{}).compose(newTestSession(), 80, 24, true)
+		on := (&clientView{}).compose(newTestSession(), 80, 24, true)
 		if cellAt(on, 72, 23).Ch == ' ' {
 			t.Fatal("default status bar is missing the clock")
 		}
 		s := newTestSession()
 		s.opts().setByID(settingStatusClock, 1)
-		off := (&compositor{}).compose(s, 80, 24, true)
+		off := (&clientView{}).compose(s, 80, 24, true)
 		if got := cellAt(off, 72, 23).Ch; got != ' ' {
 			t.Fatalf("clock hidden cell = %q, want blank", got)
 		}
@@ -221,14 +221,14 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 
 	t.Run("status bar color", func(t *testing.T) {
 		s := newTestSession()
-		f := (&compositor{}).compose(s, 80, 24, true)
+		f := (&clientView{}).compose(s, 80, 24, true)
 		// Column 60 is empty bar, past the single window tab and before the clock.
 		if got := cellAt(f, 60, 23).BG; got != colBarBG {
 			t.Fatalf("default status bar BG = %d, want the Slate palette %d", got, colBarBG)
 		}
 		navy := statusColorIndex(t, "Navy")
 		s.opts().setByID(settingStatusBarColor, statusSettingIndex(t, "Navy"))
-		f = (&compositor{}).compose(s, 80, 24, true)
+		f = (&clientView{}).compose(s, 80, 24, true)
 		if got := cellAt(f, 60, 23).BG; got != statusBarColors[navy].bg {
 			t.Fatalf("status bar BG = %d, want Navy %d", got, statusBarColors[navy].bg)
 		}
@@ -244,7 +244,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 	t.Run("active border color", func(t *testing.T) {
 		s := newTestSession()
 		s.opts().setByID(settingBorderColor, accentSettingIndex(t, "Cyan"))
-		f := (&compositor{}).compose(s, 80, 24, true)
+		f := (&clientView{}).compose(s, 80, 24, true)
 		if got := cellAt(f, 40, 5).FG; got != 39 {
 			t.Fatalf("active border FG = %d, want cyan 39", got)
 		}
@@ -255,13 +255,13 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 
 	t.Run("cursor shape and blink", func(t *testing.T) {
 		s := newTestSession()
-		f := (&compositor{}).compose(s, 80, 24, true)
+		f := (&clientView{}).compose(s, 80, 24, true)
 		if f.CursorShape != protocol.CursorShapeBlock || f.CursorBlink {
 			t.Fatalf("default cursor = shape:%d blink:%v, want steady block", f.CursorShape, f.CursorBlink)
 		}
 		s.opts().setByID(settingCursorShape, 2)
 		s.opts().setByID(settingCursorBlink, 0)
-		f = (&compositor{settingsOpen: true}).compose(s, 80, 24, true)
+		f = (&clientView{settingsOpen: true}).compose(s, 80, 24, true)
 		if f.CursorShape != protocol.CursorShapeBar || !f.CursorBlink {
 			t.Fatalf("configured cursor = shape:%d blink:%v, want blinking bar", f.CursorShape, f.CursorBlink)
 		}

@@ -141,7 +141,7 @@ func TestConfirmationDialogReplacesHelp(t *testing.T) {
 }
 
 func TestConfirmationDialogFitsSmallTerminal(t *testing.T) {
-	comp := &compositor{confirmOpen: true}
+	comp := &clientView{confirmOpen: true}
 	f := comp.compose(newTestSession(), 40, 10, true)
 	text := frameText(f)
 	for _, want := range []string{

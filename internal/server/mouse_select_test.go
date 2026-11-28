@@ -520,8 +520,7 @@ func TestSelectionCaretHiddenOnlyForTheFrozenPane(t *testing.T) {
 	// pane stays live and keeps its caret. Compose is exercised directly: the
 	// broadcast path would drop the stale selection before rendering.
 	sel.rect = layout.Rect{X: 0, Y: 0, W: 1, H: 1}
-	c.comp.selection = sel
-	frame := c.comp.compose(s.sess, s.cols, s.rows, true)
+	frame := c.compose(s.sess, s.cols, s.rows, true)
 	if !frame.CursorVisible {
 		t.Fatal("stale selection hid the caret of a live pane")
 	}

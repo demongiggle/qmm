@@ -13,7 +13,7 @@ import (
 func TestStatusBarShowsSessionBadge(t *testing.T) {
 	sess := newSession()
 	sess.name = "work"
-	var comp compositor
+	var comp clientView
 	frame := comp.compose(sess, 80, 24, true)
 	text := frameText(frame)
 	if !strings.Contains(text, "[work]") {
@@ -29,7 +29,7 @@ func TestSessionsMenuRenderAndInlineNaming(t *testing.T) {
 		{Name: "work", Windows: 1, Panes: 1, Clients: 0, Version: "v0.3.0"},
 	}
 
-	var comp compositor
+	var comp clientView
 	comp.sessionsOpen = true
 	comp.sessionsList = list
 	comp.sessionsCursor = 0

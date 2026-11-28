@@ -132,7 +132,7 @@ func TestComposeAppliesThemeToPaneAndChrome(t *testing.T) {
 	if _, err := s.panes[1].vt.Write([]byte("\x1b[38;5;196mR\x1b[38;2;18;52;86mT")); err != nil {
 		t.Fatal(err)
 	}
-	f := (&compositor{}).compose(s, 80, 24, true)
+	f := (&clientView{}).compose(s, 80, 24, true)
 
 	if got, want := cellAt(f, 0, 0).FG, protocolRGB(p.ANSI256[196]); got != want {
 		t.Errorf("pane ANSI 196 FG = %#x, want %#x", got, want)
@@ -160,7 +160,7 @@ func TestThemeAppliesToOverlaysAndCopyMode(t *testing.T) {
 	p, _ := theme.Lookup("dracula")
 	ch := chromeForPalette(p)
 
-	help := (&compositor{helpOpen: true}).compose(s.sess, 80, 24, true)
+	help := (&clientView{helpOpen: true}).compose(s.sess, 80, 24, true)
 	x0, y0, _, _ := helpBox(80, 24)
 	if got, want := cellAt(help, x0, y0).FG, ch.help.border; got != want {
 		t.Errorf("help border FG = %#x, want %#x", got, want)
@@ -169,13 +169,13 @@ func TestThemeAppliesToOverlaysAndCopyMode(t *testing.T) {
 		t.Errorf("help panel BG = %#x, want %#x", got, want)
 	}
 
-	confirm := (&compositor{confirmOpen: true}).compose(s.sess, 80, 24, true)
+	confirm := (&clientView{confirmOpen: true}).compose(s.sess, 80, 24, true)
 	x0, y0, _, _ = shutdownConfirmBox(80, 24)
 	if got, want := cellAt(confirm, x0+1, y0).BG, ch.help.panelBG; got != want {
 		t.Errorf("confirm panel BG = %#x, want %#x", got, want)
 	}
 
-	numbers := (&compositor{displayPanes: true}).compose(s.sess, 80, 24, true)
+	numbers := (&clientView{displayPanesOpen: true}).compose(s.sess, 80, 24, true)
 	found := false
 	for _, cell := range numbers.Cells {
 		if cell.Ch == '█' && (cell.BG == ch.paneNumber.activeBG || cell.BG == ch.paneNumber.panelBG) {
