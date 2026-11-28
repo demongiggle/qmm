@@ -4,17 +4,7 @@ import "github.com/demongiggle/qmm/internal/protocol"
 
 // cancelInterruptedGestures runs even for resize, detach and shutdown.
 func (s *Server) cancelInterruptedGestures(c *clientConn, msg any) {
-	if c.drag != nil {
-		switch msg.(type) {
-		case protocol.ActionDragStart, protocol.ActionDragUpdate, protocol.ActionDragEnd:
-		default:
-			hadPreview := c.drag.preview != nil
-			c.drag = nil
-			if hadPreview {
-				s.broadcast()
-			}
-		}
-	}
+	s.cancelInterruptedDrag(c, msg)
 	// A mouse selection is not modal: only the messages that extend it (drag
 	// updates, wheel steps, and the input that may carry the copy key) keep it
 	// alive. Anything else — focus, window switch, split, resize, detach —

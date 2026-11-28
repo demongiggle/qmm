@@ -95,13 +95,6 @@ type clientMsg struct {
 	msg interface{}
 }
 
-type splitterDrag struct {
-	window   *window
-	splitter int
-	delta    int
-	preview  *layout.Tree
-}
-
 type clientConn struct {
 	conn  net.Conn
 	codec *protocol.Codec

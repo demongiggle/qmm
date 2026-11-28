@@ -397,16 +397,6 @@ func (s *session) newWindow(cols, rows int) (*window, error) {
 	return w, nil
 }
 
-func resizePane(p *pane, cols, rows int) {
-	if p.ptmx != nil {
-		_ = pty.Setsize(p.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
-	}
-	p.vt.Resize(cols, rows)
-	if p.sb != nil {
-		p.sb.Resize(cols, rows)
-	}
-}
-
 // vtSnapshot copies the pane's current vt10x screen and cursor position.
 // Lines are expressed in terminal columns, the same space the scrollback
 // recorder uses: a double-width rune owns two cells and a zero-rune

@@ -1,6 +1,10 @@
 package server
 
-import "github.com/demongiggle/qmm/internal/layout"
+import (
+	"github.com/creack/pty"
+
+	"github.com/demongiggle/qmm/internal/layout"
+)
 
 // paneArea excludes the status bar. A PTY still needs at least one row
 // when the attached terminal has only enough space for the bar itself.
@@ -118,5 +122,15 @@ func (s *session) relayout(cols, rows int) {
 				resizePane(p, max(1, r.W), max(1, r.H))
 			}
 		}
+	}
+}
+
+func resizePane(p *pane, cols, rows int) {
+	if p.ptmx != nil {
+		_ = pty.Setsize(p.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	}
+	p.vt.Resize(cols, rows)
+	if p.sb != nil {
+		p.sb.Resize(cols, rows)
 	}
 }
