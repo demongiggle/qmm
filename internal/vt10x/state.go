@@ -84,6 +84,7 @@ type parseState func(c rune)
 type State struct {
 	DebugLogger *log.Logger
 
+	history       Scrollback
 	w             io.Writer
 	mu            sync.Mutex
 	changed       ChangeFlag
@@ -104,9 +105,10 @@ type State struct {
 	colorOverride map[Color]Color
 }
 
-func newState(w io.Writer) *State {
+func newState(info TerminalInfo) *State {
 	return &State{
-		w:             w,
+		w:             info.w,
+		history:       info.history,
 		colorOverride: make(map[Color]Color),
 	}
 }
@@ -232,7 +234,7 @@ func (t *State) putTab(forward bool) {
 func (t *State) newline(firstCol bool) {
 	y := t.cur.Y
 	if y == t.bottom {
-		t.scrollUp(t.top, 1)
+		t.scrollUp(1)
 	} else {
 		y++
 	}
@@ -475,8 +477,18 @@ func (t *State) scrollDown(orig, n int) {
 	// TODO: selection scroll
 }
 
-func (t *State) scrollUp(orig, n int) {
-	n = clamp(n, 0, t.bottom-orig+1)
+func (t *State) scrollUp(n int) {
+	n = clamp(n, 0, t.bottom-t.top+1)
+	if t.history != nil && t.top == 0 && t.mode&ModeAltScreen == 0 {
+		for y := 0; y < n; y++ {
+			t.history.AppendRow(t, y)
+		}
+	}
+	t.moveLinesUp(t.top, n)
+}
+
+// moveLinesUp shifts screen storage for both scrolling and line deletion.
+func (t *State) moveLinesUp(orig, n int) {
 	t.clear(0, orig, t.cols-1, orig+n-1)
 	t.changed |= ChangedScreen
 	for i := orig; i <= t.bottom-n; i++ {
@@ -719,7 +731,7 @@ func (t *State) deleteLines(n int) {
 	if t.cur.Y < t.top || t.cur.Y > t.bottom {
 		return
 	}
-	t.scrollUp(t.cur.Y, n)
+	t.moveLinesUp(t.cur.Y, clamp(n, 0, t.bottom-t.cur.Y+1))
 }
 
 func (t *State) deleteChars(n int) {

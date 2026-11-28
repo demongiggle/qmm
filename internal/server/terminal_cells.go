@@ -11,7 +11,7 @@ import (
 // preview can be narrower or wider than the VT, so the number of source
 // glyphs and the destination width are independent. A clipped glyph is a
 // styled space; a wide glyph's continuation has Ch == 0.
-func projectVTRow(vt vt10x.View, y, sourceCols, width int, emit func(int, copyCell)) {
+func projectVTRow(vt vt10x.CellGrid, y, sourceCols, width int, emit func(int, copyCell)) {
 	col := 0
 	for x := 0; x < sourceCols && col < width; x++ {
 		g := vt.Cell(x, y)
@@ -98,21 +98,27 @@ func vtColor(c vt10x.Color) int32 {
 
 // vtSnapshot copies the pane's current vt10x screen and cursor position.
 // Lines are expressed in terminal columns, the same space the scrollback
-// recorder uses: a double-width rune owns two cells and a zero-rune
+// ring uses: a double-width rune owns two cells and a zero-rune
 // placeholder marks its second half. The whole copy buffer then shares one
 // coordinate system, so a screen column maps 1:1 onto a buffer column.
 func (p *pane) vtSnapshot() ([]copyLine, int, int) {
 	p.vt.Lock()
 	defer p.vt.Unlock()
+	return p.snapshotLocked()
+}
+
+func snapshotRow(grid vt10x.CellGrid, y, cols int) copyLine {
+	cells := make([]copyCell, cols)
+	projectVTRow(grid, y, cols, cols, func(x int, cell copyCell) { cells[x] = cell })
+	return copyLine{cells: cells}
+}
+
+func (p *pane) snapshotLocked() ([]copyLine, int, int) {
 	cols, rows := p.vt.Size()
 	cur := p.vt.Cursor()
 	out := make([]copyLine, rows)
 	for y := 0; y < rows; y++ {
-		cells := make([]copyCell, cols)
-		projectVTRow(p.vt, y, cols, cols, func(x int, cell copyCell) {
-			cells[x] = cell
-		})
-		out[y] = copyLine{cells: cells}
+		out[y] = snapshotRow(p.vt, y, cols)
 	}
 	return out, renderedCursorColumn(p.vt, cur.X, cur.Y), cur.Y
 }

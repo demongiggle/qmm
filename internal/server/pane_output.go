@@ -2,28 +2,23 @@ package server
 
 import (
 	"bufio"
-	"io"
+
+	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
-// readLoop owns the PTY byte stream. vt10x supplies the live screen and
-// cursor. The scrollback recorder retains rows evicted from its main screen
-// and receives a fresh VT snapshot after each successful Parse.
+func (p *pane) initTerminal(cols, rows int) {
+	p.sb.Clear()
+	p.vt = vt10x.New(vt10x.WithSize(cols, rows), vt10x.WithScrollback(&p.sb))
+}
+
+// readLoop feeds the PTY stream to the VT, which records rows as they scroll.
 func (p *pane) readLoop(exitCh chan int, onOutput func()) {
-	// Tee the raw PTY bytes into the scrollback recorder while vt10x parses
-	// them. The recorder only models line scrolling; the copy-mode buffer gets
-	// its visible rows directly from vt10x below.
-	br := bufio.NewReaderSize(io.TeeReader(p.ptmx, p.sb), 32*1024)
+	br := bufio.NewReaderSize(p.ptmx, 32*1024)
 	for {
 		if err := p.vt.Parse(br); err != nil {
 			p.notifyExit(exitCh)
 			return
 		}
-		// Resync the recorder with vt10x after every parsed chunk. The
-		// recorder only needs to notice lines that scroll off; starting each
-		// chunk from the real screen keeps uncommon escape sequences from
-		// accumulating drift.
-		lines, cx, cy := p.vtSnapshot()
-		p.sb.SetScreen(lines, cx, cy)
 		// Drain the entire buffered PTY chunk before scheduling a render so
 		// applications that hide/redraw/show the cursor in one write (such
 		// as watch or ncurses) don't emit intermediate cursor-hidden frames.
@@ -46,12 +41,11 @@ func (p *pane) copyBufferAtCursor() ([]copyLine, copyPoint) {
 	if p == nil {
 		return nil, copyPoint{}
 	}
-	lines := []copyLine{}
-	if p.sb != nil {
-		lines = append(lines, p.sb.History()...)
-	}
+	p.vt.Lock()
+	defer p.vt.Unlock()
+	lines := p.sb.History()
 	history := len(lines)
-	visible, curX, curY := p.vtSnapshot()
+	visible, curX, curY := p.snapshotLocked()
 	lines = append(lines, visible...)
 	// The live screen sits at the bottom of the buffer, so the cursor's screen
 	// row maps onto the same row of the snapshot regardless of scrollback.

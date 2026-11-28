@@ -30,7 +30,7 @@ type pane struct {
 	cmd       *exec.Cmd
 	ptmx      *os.File
 	vt        vt10x.Terminal
-	sb        *scrollback
+	sb        scrollback
 	closeOnce sync.Once
 }
 
@@ -219,9 +219,8 @@ func (s *session) spawnPaneCommand(dir string, argv []string, cols, rows int) (*
 		id:   id,
 		cmd:  cmd,
 		ptmx: ptmx,
-		vt:   vt10x.New(vt10x.WithSize(cols, rows)),
-		sb:   newScrollback(cols, rows),
 	}
+	p.initTerminal(cols, rows)
 	s.panes[id] = p
 	go p.readLoop(s.exitCh, s.onOutput)
 	// Reap the child when it exits; the PTY read loop usually notices first

@@ -21,13 +21,28 @@ type Terminal interface {
 	Parse(bf *bufio.Reader) error
 }
 
-// View represents the view of the virtual terminal emulator.
-type View interface {
-	// String dumps the virtual terminal contents.
-	fmt.Stringer
-
+// CellGrid gives read access to the current screen.
+type CellGrid interface {
 	// Size returns the size of the virtual terminal.
 	Size() (cols, rows int)
+
+	// Cell returns the glyph containing the character code, foreground color, and
+	// background color at position (x, y) relative to the top left of the terminal.
+	Cell(x, y int) Glyph
+}
+
+// Scrollback receives history events under the VT lock. AppendRow must
+// consume the row before returning, while it still belongs to the screen.
+type Scrollback interface {
+	AppendRow(grid CellGrid, y int)
+	Clear()
+}
+
+// View represents the view of the virtual terminal emulator.
+type View interface {
+	CellGrid
+	// String dumps the virtual terminal contents.
+	fmt.Stringer
 
 	// Resize changes the size of the virtual terminal.
 	Resize(cols, rows int)
@@ -37,10 +52,6 @@ type View interface {
 
 	// Title represents the title of the console window.
 	Title() string
-
-	// Cell returns the glyph containing the character code, foreground color, and
-	// background color at position (x, y) relative to the top left of the terminal.
-	Cell(x, y int) Glyph
 
 	// Cursor returns the current position of the cursor.
 	Cursor() Cursor
@@ -58,8 +69,13 @@ type View interface {
 type TerminalOption func(*TerminalInfo)
 
 type TerminalInfo struct {
+	history    Scrollback
 	w          io.Writer
 	cols, rows int
+}
+
+func WithScrollback(history Scrollback) TerminalOption {
+	return func(info *TerminalInfo) { info.history = history }
 }
 
 func WithWriter(w io.Writer) TerminalOption {

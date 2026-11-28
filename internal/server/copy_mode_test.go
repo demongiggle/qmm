@@ -381,8 +381,9 @@ func TestCopyModeStartsAtPaneCursor(t *testing.T) {
 
 	// Scrollback shifts the live screen down, so the same pane cursor maps to a
 	// later buffer line and the view still shows its bottom.
-	p.sb = newScrollback(st.rect.W, st.rect.H)
-	writeScrollbackLines(p.sb, 30, "hist")
+	p.initTerminal(st.rect.W, st.rect.H)
+	writeScrollbackLines(p.vt, 30, "hist")
+	_, _ = p.vt.Write([]byte("\x1b[3;6H"))
 	s.closeCopyMode(c)
 	s.openCopyMode(c, 0)
 	st = c.copyMode

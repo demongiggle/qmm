@@ -483,8 +483,7 @@ func TestComposeWideGlyphCaretStaysInsidePane(t *testing.T) {
 // terminal-column layout as the live pane: no dropped runes, consistent
 // selection columns, and text that survives round-tripping.
 func TestSnapshotLineLayout(t *testing.T) {
-	// Building the snapshot through vtSnapshot exercises the column-space
-	// expansion; the recorder uses the same space.
+	// Snapshots and history share the live frame's terminal-column projection.
 	p := &pane{vt: vt10x.New(vt10x.WithSize(39, 23))}
 	if _, err := p.vt.Write([]byte("\x1b[m\x1b[38;5;252m\x1b[48;5;235m\x1b[H\x1b[2J日本語 A行")); err != nil {
 		t.Fatal(err)

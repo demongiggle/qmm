@@ -20,7 +20,7 @@ func newPaneOutputFixture(t *testing.T) (*Server, *clientConn, func(string)) {
 	delete(s.sess.panes, 2)
 	s.relayout()
 	p := s.sess.activePane()
-	p.sb = newScrollback(48, 9)
+	p.initTerminal(48, 9)
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestPaneOutputPreservesMainHistoryThroughAlternateScreenAndResize(t *testin
 	copyFrame := behaviorFrame(t, c)
 	requireFrameRow(t, copyFrame, 0, "歷 史 A")
 	requireFrameRow(t, copyFrame, 1, "main-two")
-	if cell := cellAt(copyFrame, 2, 0); cell.FG != 1 || cell.Style&protocol.StyleBold == 0 {
+	if cell := cellAt(copyFrame, 2, 0); cell.FG != 9 || cell.Style&protocol.StyleBold == 0 {
 		t.Errorf("historical cell = %+v, want bold red text", cell)
 	}
 	if strings.Contains(frameText(copyFrame), "alternate-output") {
@@ -283,4 +283,40 @@ func TestCopyPasteBufferIsSharedButClipboardIsClientLocal(t *testing.T) {
 	}
 	sendBehaviorInput(s, peer, "\x01]")
 	requirePaneInput(t, input, "共享 clipboard共享 clipboard")
+}
+
+func TestPaneHistoryFirstScrollAfterShrink(t *testing.T) {
+	s, c, output := newPaneOutputFixture(t)
+	s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 52, Rows: 14}})
+	var lines []string
+	for i := 1; i <= 14; i++ {
+		lines = append(lines, fmt.Sprintf("main-%02d", i))
+	}
+	output(strings.Join(lines, "\r\n"))
+	s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 40, Rows: 10}})
+	requireFrameRow(t, behaviorFrame(t, c), 0, "main-06")
+	output("\r\nmain-15")
+	requireFrameRow(t, behaviorFrame(t, c), 0, "main-07")
+	sendBehaviorInput(s, c, "\x01[", "g", "g")
+	requireFrameRow(t, behaviorFrame(t, c), 0, "main-01")
+	requireFrameRow(t, behaviorFrame(t, c), 1, "main-06")
+}
+
+func TestPaneHistoryBoldColorAcrossReads(t *testing.T) {
+	const red = "\x1b[1;31mRED\x1b[0m"
+	scroll := strings.Repeat("\r\nnext", 9)
+	for name, chunks := range map[string][]string{"one read": {red + scroll}, "two reads": {red, scroll}} {
+		t.Run(name, func(t *testing.T) {
+			s, c, output := newPaneOutputFixture(t)
+			for _, chunk := range chunks {
+				output(chunk)
+			}
+			sendBehaviorInput(s, c, "\x01[", "g", "g")
+			frame := behaviorFrame(t, c)
+			requireFrameRow(t, frame, 0, "RED")
+			if cell := cellAt(frame, 1, 0); cell.FG != 9 || cell.Style&protocol.StyleBold == 0 {
+				t.Errorf("history cell = %+v, want VT bold bright red", cell)
+			}
+		})
+	}
 }
