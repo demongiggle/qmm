@@ -24,6 +24,34 @@ func addTestWindow(t *testing.T, s *Server, index int) {
 	s.sess.panes[id] = &pane{id: id, vt: vt10x.New(vt10x.WithSize(39, 23))}
 }
 
+func TestWindowCycleSkipsClosedNumbersAndWraps(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	addTestWindow(t, s, 2)
+	addTestWindow(t, s, 7)
+	for _, step := range []struct {
+		key  string
+		want int
+	}{
+		{"n", 2},
+		{"n", 7},
+		{"n", 0},
+		{"p", 7},
+		{"p", 2},
+		{"l", 7},
+	} {
+		sendBehaviorInput(s, c, "\x01"+step.key)
+		tabs := behaviorFrame(t, c).Tabs
+		if len(tabs) != 3 || tabs[0].Index != 0 || tabs[1].Index != 2 || tabs[2].Index != 7 {
+			t.Fatalf("tabs after prefix %s = %+v, want ordered indices 0, 2, 7", step.key, tabs)
+		}
+		for _, tab := range tabs {
+			if tab.Active != (tab.Index == step.want) {
+				t.Errorf("prefix %s: tab %d active = %t, want only tab %d active", step.key, tab.Index, tab.Active, step.want)
+			}
+		}
+	}
+}
+
 func TestWindowGotoSingleDigitSelectsImmediately(t *testing.T) {
 	for d := '0'; d <= '9'; d++ {
 		if !isExactBinding(string(d)) {

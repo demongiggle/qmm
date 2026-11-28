@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -128,6 +130,33 @@ func TestServerLifecycle(t *testing.T) {
 
 	// Wait for the server to accept connections.
 	waitSocket(t, sock)
+
+	for _, tc := range []struct {
+		name  string
+		first any
+	}{
+		{"resize before Hello", protocol.Resize{Cols: 80, Rows: 24}},
+		{"zero-width Hello", protocol.Hello{Cols: 0, Rows: 24}},
+		{"oversized Hello", protocol.Hello{Cols: 80, Rows: 1001}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conn, err := net.DialTimeout("unix", sock, 2*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			codec := protocol.NewCodec(conn)
+			if err := codec.Send(tc.first); err != nil {
+				t.Fatal(err)
+			}
+			if msg, err := codec.Recv(); !errors.Is(err, io.EOF) {
+				t.Fatalf("invalid handshake returned %#v, %v; want EOF", msg, err)
+			}
+		})
+	}
 
 	c := dial(t, sock, 80, 24)
 

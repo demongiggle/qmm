@@ -163,3 +163,64 @@ func TestSplitterDragCancelledByWindowSwitch(t *testing.T) {
 		t.Fatalf("splitter row after interrupted drag = %d, want %d", got, border.Y)
 	}
 }
+
+func TestSplitterDragCommitMovesAnotherClientsCopyViewport(t *testing.T) {
+	s, driver, border := newDragServer(t, layout.Horizontal)
+	viewer := newHelpClient()
+	s.clients[viewer] = struct{}{}
+	writePaneText(t, s, 2, "bottom copy marker")
+	sendBehaviorInput(s, viewer, "\x01[")
+	initial := behaviorActivePane(t, viewer)
+
+	s.handleClientMessage(clientMsg{driver, protocol.ActionDragStart{Splitter: border.ID}})
+	s.handleClientMessage(clientMsg{driver, protocol.ActionDragUpdate{Splitter: border.ID, Delta: 4}})
+	if got := behaviorActivePane(t, driver).Y; got != initial.Y+4 {
+		t.Fatalf("driver's preview row = %d, want %d", got, initial.Y+4)
+	}
+	if got := behaviorActivePane(t, viewer); got != initial {
+		t.Fatalf("copy viewer's geometry changed during preview: got %+v, want %+v", got, initial)
+	}
+	s.handleClientMessage(clientMsg{driver, protocol.ActionDragEnd{Splitter: border.ID}})
+
+	frame := behaviorFrame(t, viewer)
+	active := behaviorActivePane(t, viewer)
+	if active.Y != initial.Y+4 || active.H != initial.H-4 {
+		t.Fatalf("copy viewer's pane after release = %+v, was %+v", active, initial)
+	}
+	if got := cellAt(frame, active.X, active.Y).Ch; got != 'b' || !strings.Contains(frameText(frame), "[copy mode]") {
+		t.Fatal("copy view did not follow its pane on commit")
+	}
+	s.handleClientMessage(clientMsg{viewer, protocol.ActionSelectStart{X: active.X, Y: active.Y}})
+	s.handleClientMessage(clientMsg{viewer, protocol.ActionSelectUpdate{X: active.X + 5, Y: active.Y}})
+	sendBehaviorInput(s, viewer, "y")
+	if clip, ok := queuedClipboard(viewer); !ok || clip.Text != "bottom" {
+		t.Fatalf("clipboard after selecting in the moved viewport = %#v, want bottom", clip)
+	}
+}
+
+func TestSplitterDragFirstCommitInvalidatesCompetingPreview(t *testing.T) {
+	s, first, border := newDragServer(t, layout.Horizontal)
+	second := newHelpClient()
+	s.clients[second] = struct{}{}
+	start := protocol.ActionDragStart{Splitter: border.ID}
+	end := protocol.ActionDragEnd{Splitter: border.ID}
+	s.handleClientMessage(clientMsg{first, start})
+	s.handleClientMessage(clientMsg{second, start})
+	s.handleClientMessage(clientMsg{first, protocol.ActionDragUpdate{Splitter: border.ID, Delta: 4}})
+	s.handleClientMessage(clientMsg{second, protocol.ActionDragUpdate{Splitter: border.ID, Delta: -3}})
+	if got := behaviorFrame(t, second).Splitters[0].Y; got != border.Y-3 {
+		t.Fatalf("second client's preview row = %d, want %d", got, border.Y-3)
+	}
+	// A release for a different splitter must not apply or cancel the drag.
+	s.handleClientMessage(clientMsg{first, protocol.ActionDragEnd{Splitter: border.ID + 1}})
+	if got := behaviorFrame(t, second).Splitters[0].Y; got != border.Y-3 {
+		t.Fatalf("unmatched release invalidated the second client's preview: row %d", got)
+	}
+	s.handleClientMessage(clientMsg{first, end})
+	s.handleClientMessage(clientMsg{second, end})
+	for _, c := range []*clientConn{first, second} {
+		if got := behaviorFrame(t, c).Splitters[0].Y; got != border.Y+4 {
+			t.Errorf("splitter row after competing releases = %d, want %d", got, border.Y+4)
+		}
+	}
+}
