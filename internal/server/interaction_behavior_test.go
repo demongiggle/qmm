@@ -197,3 +197,26 @@ func TestSessionMenuRefreshKeepsSelectionAndIgnoresLateResults(t *testing.T) {
 		t.Fatalf("late discovery result reopened the menu:\n%s", text)
 	}
 }
+
+func TestConfigWarningDuringCopyKeepsMouseBlockedUntilBothViewsClose(t *testing.T) {
+	s, c := newHelpServer(80, 24)
+	input := capturePaneInput(t, s.sess.activePane())
+	sendBehaviorInput(s, c, "\x01[")
+	s.showConfigWarning(c, configWarning{Reason: "test warning"})
+	s.broadcast()
+	// Copy mode gets keys first, but a warning blocks the outside click that
+	// would normally close copy mode and focus the second pane.
+	s.handleClientMessage(clientMsg{c, protocol.ActionFocus{X: 42, Y: 2}})
+	if !strings.Contains(frameText(behaviorFrame(t, c)), "[copy mode]") {
+		t.Fatal("outside click dismissed copy mode under a pending warning")
+	}
+	sendBehaviorInput(s, c, "q")
+	if !strings.Contains(frameText(behaviorFrame(t, c)), "CONFIGURATION WARNING") {
+		t.Fatal("leaving copy mode did not reveal the pending warning")
+	}
+	sendBehaviorInput(s, c, "\x1b", "live")
+	requirePaneInput(t, input, "live")
+	if got := behaviorActivePane(t, c).Number; got != 0 {
+		t.Fatalf("blocked click moved focus to pane %d", got)
+	}
+}
