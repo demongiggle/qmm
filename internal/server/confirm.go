@@ -23,12 +23,7 @@ func (s *Server) openShutdownConfirm(c *clientConn) {
 	if c.confirmOpen {
 		return
 	}
-	c.helpOpen = false
-	c.helpTop = 0
-	c.settingsOpen = false
-	c.sessionsOpen = false
-	c.sessionsNaming = false
-	c.resetLayoutsMenu()
+	c.setMenu(menuNone)
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()

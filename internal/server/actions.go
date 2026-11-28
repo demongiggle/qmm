@@ -33,129 +33,7 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		return s.shutdownRequested
 	}
 	c := in.cli
-	if c.drag != nil {
-		switch in.msg.(type) {
-		case protocol.ActionDragStart, protocol.ActionDragUpdate, protocol.ActionDragEnd:
-		default:
-			hadPreview := c.drag.preview != nil
-			c.drag = nil
-			if hadPreview {
-				s.broadcast()
-			}
-		}
-	}
-	// A mouse selection is not modal: only the messages that extend it (drag
-	// updates, wheel steps, and the input that may carry the copy key) keep it
-	// alive. Anything else — focus, window switch, split, resize, detach —
-	// cancels the selection first and then runs normally.
-	if c.selection != nil && !selectionKeepsAlive(in.msg) {
-		s.clearSelection(c)
-	}
-	// A config recovery warning is modal: only lifecycle and input messages
-	// are handled. Everything else is swallowed rather than changing the
-	// session underneath the warning.
-	if c.configWarningOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			return false
-		}
-	}
-	// Copy mode owns one pane, not the whole screen: keyboard input and wheel
-	// steps drive it, and a drag inside (or past) its pane extends its
-	// selection. Other pane actions are swallowed, but mouse gestures outside
-	// the pane leave copy mode first so clicks, tab switches, splitter drags
-	// and double-click zoom keep working on the layout that stays visible.
-	if st := c.copyMode; st != nil && st.open {
-		switch msg := in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane,
-			protocol.ActionWheel, protocol.ActionSelectUpdate:
-			// Reaches copy mode below.
-		case protocol.ActionSelectStart:
-			if !st.covers(msg.X, msg.Y) {
-				s.closeCopyMode(c)
-			}
-		case protocol.ActionFocus:
-			if !st.covers(msg.X, msg.Y) {
-				s.closeCopyMode(c)
-			}
-		case protocol.ActionSelectWindow, protocol.ActionDragStart, protocol.ActionTogglePaneZoom:
-			s.closeCopyMode(c)
-		default:
-			return false
-		}
-	}
-	// While the shutdown dialog is open, only lifecycle and input messages
-	// are handled. Mouse/action messages are swallowed rather than changing
-	// the session underneath the pending decision.
-	if c.confirmOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			return false
-		}
-	}
-	// While the session menu is open, mouse/action messages dismiss the
-	// overlay instead of changing panes or windows underneath it.
-	if c.sessionsOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane, sessionListResult:
-		default:
-			s.closeSessionsMenu(c)
-			return false
-		}
-	}
-	// While the layout menu is open, mouse/action messages dismiss the overlay
-	// instead of changing panes or windows underneath it.
-	if c.layoutsOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			s.closeLayoutsMenu(c)
-			return false
-		}
-	}
-	// While the settings page is open, mouse/action messages dismiss the
-	// overlay instead of changing panes or windows underneath it.
-	if c.settingsOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			s.closeSettings(c)
-			return false
-		}
-	}
-	// While pane numbers are shown, mouse/action messages dismiss the
-	// transient overlay instead of focusing or resizing panes underneath it.
-	if c.displayPanesOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			s.closeDisplayPanes(c)
-			return false
-		}
-	}
-	// While a numeric window jump is pending, mouse/action messages cancel it
-	// instead of switching focus or windows underneath the typed number.
-	if c.windowGotoOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			s.closeWindowGoto(c)
-			return false
-		}
-	}
-	// While help is open, mouse/action messages dismiss the overlay instead
-	// of reaching the panes underneath. Input and control messages are
-	// handled below.
-	if c.helpOpen {
-		switch in.msg.(type) {
-		case protocol.Input, protocol.Resize, protocol.Detach, protocol.Shutdown, forceKillPane:
-		default:
-			s.closeHelp(c)
-			return false
-		}
-	}
+	s.cancelInterruptedGestures(c, in.msg)
 	switch msg := in.msg.(type) {
 	case protocol.Input:
 		s.handleInput(c, msg.Data)
@@ -180,6 +58,18 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 	case protocol.Shutdown:
 		s.requestShutdown()
 		return true
+	default:
+		if s.routeOverlay(c, in.msg) {
+			return false
+		}
+		s.handleAction(c, in.msg)
+	}
+	return s.shutdownRequested
+}
+
+// handleAction applies a message that passed the client-local interaction rules.
+func (s *Server) handleAction(c *clientConn, action any) {
+	switch msg := action.(type) {
 	case protocol.ActionFocus:
 		s.focusAt(msg.X, msg.Y)
 	case protocol.ActionSelectWindow:
@@ -221,7 +111,6 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 	case sessionListResult:
 		s.handleSessionListResult(c, msg)
 	}
-	return s.shutdownRequested
 }
 
 // forceKillPane is an internal message used to escalate a kill after a timeout.
@@ -241,10 +130,6 @@ func (s *Server) killPaneNow(paneID int) {
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
-}
-
-func (s *Server) contentRect() layout.Rect {
-	return layout.Rect{X: 0, Y: 0, W: s.cols, H: s.rows - statusRows}
 }
 
 func (s *Server) detachClient(c *clientConn, reason string) {
@@ -308,8 +193,7 @@ func (s *Server) focusAt(x, y int) {
 	if w == nil || w.zoomed {
 		return
 	}
-	bounds := s.contentRect()
-	for id, r := range w.tree.Compute(bounds) {
+	for id, r := range s.paneRects() {
 		if r.Contains(x, y) {
 			if id != w.activePane {
 				w.activePane = id
@@ -331,8 +215,8 @@ func (s *Server) selectWindow(i int) {
 }
 
 func (s *Server) newWindow() {
-	cols, rows := s.cols, s.rows-statusRows
-	if _, err := s.sess.newWindow(cols, rows); err != nil {
+	area := s.contentRect()
+	if _, err := s.sess.newWindow(area.W, area.H); err != nil {
 		return
 	}
 	s.relayout()
@@ -340,7 +224,8 @@ func (s *Server) newWindow() {
 }
 
 func (s *Server) splitActive(dir layout.Direction) {
-	if _, err := s.sess.splitActivePane(s.cols, s.rows-statusRows, dir); err != nil {
+	area := s.contentRect()
+	if _, err := s.sess.splitActivePane(area.W, area.H, dir); err != nil {
 		return
 	}
 	s.relayout()
@@ -485,55 +370,6 @@ func (s *Server) resizePane(direction uint8, delta int) {
 		s.needFull = true
 		s.broadcast()
 	}
-}
-
-func (s *Server) dragStart(c *clientConn, splitterID int) {
-	w := s.activeWindow()
-	if w == nil || w.zoomed || c.drag != nil {
-		return
-	}
-	for _, b := range w.tree.Borders(s.contentRect()) {
-		if b.ID == splitterID {
-			c.drag = &splitterDrag{window: w, splitter: splitterID}
-			return
-		}
-	}
-}
-
-func (s *Server) dragUpdate(c *clientConn, splitterID, delta int) {
-	drag := c.drag
-	if drag == nil || drag.splitter != splitterID || delta == 0 {
-		return
-	}
-	// Measure from the original layout so returning the pointer also restores
-	// the divider after hitting a pane's minimum size.
-	drag.delta += delta
-	preview := drag.window.tree.Clone()
-	if !preview.ResizeSplit(splitterID, drag.delta, s.contentRect()) {
-		preview = nil
-	}
-	if preview == nil && drag.preview == nil {
-		return
-	}
-	drag.preview = preview
-	s.broadcast()
-}
-
-func (s *Server) dragEnd(c *clientConn, splitterID int) {
-	drag := c.drag
-	if drag == nil || drag.splitter != splitterID {
-		return
-	}
-	c.drag = nil
-	if drag.preview == nil {
-		return
-	}
-	if _, attached := s.clients[c]; !attached {
-		return
-	}
-	drag.window.tree = drag.preview
-	s.relayout()
-	s.broadcast()
 }
 
 // --- input byte stream and prefix machine ---------------------------------
@@ -682,66 +518,8 @@ func translateAppCursor(data []byte, app bool) []byte {
 	return out
 }
 
-func (s *Server) handleInput(c *clientConn, data []byte) {
-	// A pending mouse selection intercepts exactly one key: the configured
-	// copy key. Every other key returns to the live pane first, so typing,
-	// prefix chords and detach all keep working while a selection is visible.
-	if c.selection != nil {
-		if s.sess != nil && string(data) == copyKeySequence(s.sess.opts()) {
-			// The copy key is a keystroke of its own: it consumes a pending
-			// prefix instead of leaving the next key to continue the chord.
-			c.prefixArmed = false
-			c.prefixBuf = nil
-			c.clearRepeat()
-			s.copyMouseSelection(c)
-			return
-		}
-		s.clearSelection(c)
-	}
-	if c.copyMode != nil && c.copyMode.open {
-		c.clearRepeat()
-		s.handleCopyModeInput(c, data)
-		return
-	}
-	if c.configWarningOpen {
-		c.clearRepeat()
-		s.handleConfigWarningInput(c, data)
-		return
-	}
-	if c.confirmOpen {
-		c.clearRepeat()
-		s.handleShutdownConfirmInput(c, data)
-		return
-	}
-	if c.sessionsOpen {
-		c.clearRepeat()
-		s.handleSessionsMenuInput(c, data)
-		return
-	}
-	if c.layoutsOpen {
-		c.clearRepeat()
-		s.handleLayoutsMenuInput(c, data)
-		return
-	}
-	if c.settingsOpen {
-		c.clearRepeat()
-		s.handleSettingsInput(c, data)
-		return
-	}
-	// A number typed after the overlay's timeout belongs to the pane again.
-	if c.displayPanesOpen && s.displayPanesExpired(c) {
-		s.expireDisplayPanesFor(c)
-	}
-	if c.displayPanesOpen {
-		c.clearRepeat()
-		s.handleDisplayPanesInput(c, data)
-		return
-	}
-	if c.helpOpen {
-		c.clearRepeat()
-		s.handleHelpInput(c, data)
-		return
-	}
+// handlePaneInput processes the byte stream after client-local overlays.
+func (s *Server) handlePaneInput(c *clientConn, data []byte) {
 	// A pending numeric window jump owns the next digits; a stale one commits
 	// before ordinary input resumes.
 	if c.windowGotoOpen && s.windowGotoExpired(c) {

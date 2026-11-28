@@ -5,20 +5,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/rivo/uniseg"
-
 	"github.com/demongiggle/qmm/internal/layout"
 	"github.com/demongiggle/qmm/internal/protocol"
-	"github.com/demongiggle/qmm/internal/vt10x"
-)
-
-// vt10x glyph attribute bits (see vt10x state.go).
-const (
-	gttrReverse   = 1 << 0
-	gttrUnderline = 1 << 1
-	gttrBold      = 1 << 2
-	gttrItalic    = 1 << 4
-	gttrBlink     = 1 << 5
 )
 
 const (
@@ -48,60 +36,17 @@ const (
 	colConfirmMuted    = colHelpMuted
 )
 
-// compositor turns session state into protocol frames and diffs successive
-// frames to produce incremental updates.
+// compositor borrows one client's view for the duration of a frame.
 type compositor struct {
+	*clientView
+	chrome chrome
+}
+
+// frameDiff retains the last grid delivered to this client's send queue.
+type frameDiff struct {
 	lastCols, lastRows int
 	last               []protocol.Cell
 	haveLast           bool
-
-	// chrome is the resolved theme palette for the frame being composed.
-	chrome chrome
-
-	helpOpen bool
-	helpTop  int
-
-	confirmOpen bool
-
-	configWarning     configWarning
-	configWarningOpen bool
-
-	displayPanes      bool
-	displayPanesInput string
-
-	settingsOpen   bool
-	settingsCursor int
-	settingsTop    int
-
-	sessionsOpen    bool
-	sessionsLoading bool
-	sessionsList    []protocol.SessionInfo
-	sessionsCursor  int
-	sessionsTop     int
-	sessionsNaming  bool
-	sessionsInput   string
-	sessionsError   string
-
-	layoutsOpen             bool
-	layoutsList             []savedLayout
-	layoutsCursor           int
-	layoutsTop              int
-	layoutsNaming           bool
-	layoutsInput            string
-	layoutsError            string
-	layoutsMessage          string
-	layoutsConfirmOverwrite string
-	layoutsConfirmDelete    string
-
-	copyMode *copyModeState
-
-	// selection is a mouse drag selection: a frozen snapshot of one pane that
-	// is drawn in place while the rest of the layout stays live.
-	selection *selectionState
-
-	// During a border drag, draw the proposed geometry using the live VT
-	// contents. The pane sizes are committed when the button is released.
-	dragPreview *layout.Tree
 }
 
 func blankCell(row, col int, bg int32) protocol.Cell {
@@ -110,9 +55,9 @@ func blankCell(row, col int, bg int32) protocol.Cell {
 
 // compose renders the current session state into a frame. It is called from
 // the server's single event loop, so session state is stable while it runs.
-func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protocol.Frame {
+func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protocol.Frame {
 	opts := s.opts()
-	c.chrome = opts.chrome()
+	c := compositor{clientView: v, chrome: opts.chrome()}
 	cells := make([]protocol.Cell, cols*rows)
 	for i := range cells {
 		cells[i] = blankCell(i/cols, i%cols, c.chrome.background)
@@ -144,15 +89,15 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			c.drawConfigWarning(&frame, setCell, cols, rows, c.configWarning)
 		} else if c.confirmOpen {
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)
-		} else if c.helpOpen {
+		} else if c.menu == menuHelp {
 			c.drawHelp(&frame, setCell, cols, rows)
-		} else if c.sessionsOpen {
+		} else if c.menu == menuSessions {
 			c.drawSessionsMenu(&frame, setCell, cols, rows, s.sessionName(), opts)
-		} else if c.layoutsOpen {
+		} else if c.menu == menuLayouts {
 			c.drawLayoutsMenu(&frame, setCell, cols, rows, nextLayoutName(c.layoutsList))
-		} else if c.settingsOpen {
+		} else if c.menu == menuSettings {
 			c.drawSettings(&frame, setCell, cols, rows, opts)
-		} else if c.displayPanes {
+		} else if c.displayPanesOpen {
 			c.drawDisplayPanes(&frame, setCell, cols, rows, showClock)
 		}
 		// Keep pane metadata deterministic despite the layout's rect map.
@@ -167,7 +112,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			}
 			return a.ID < b.ID
 		})
-		return c.diff(cells, forceFull, frame)
+		return v.frames.diff(cells, forceFull, frame)
 	}
 
 	if cols < minCols || rows < minRows {
@@ -186,7 +131,7 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 		return render()
 	}
 
-	area := layout.Rect{X: 0, Y: 0, W: cols, H: rows - statusRows}
+	area := paneArea(cols, rows)
 
 	var marks map[int]uint8 // cellIndex -> bitmask 1=vert 2=horiz
 
@@ -194,12 +139,9 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 	var haveActive bool
 
 	if w != nil {
-		tree := w.tree
-		if c.dragPreview != nil {
-			tree = c.dragPreview
-		}
-		rects := tree.Compute(area)
-		borders := tree.Borders(area)
+		geometry := v.frameGeometry(w, area)
+		rects := geometry.splitRects()
+		borders := geometry.tree.Borders(area)
 
 		for id, r := range rects {
 			p := s.panes[id]
@@ -218,19 +160,19 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			if id == w.activePane {
 				activeRect, haveActive = r, true
 			}
-			if id == w.activePane && !w.zoomed {
+			if id == w.activePane && geometry.zoom == nil {
 				cur := p.vtCursor()
 				frame.CursorX, frame.CursorY = r.X+clampInt(cur.x, 0, r.W-1), r.Y+cur.y
 				// A frozen snapshot has no live caret, and a copy view
 				// replaces the pane's cells with scrollback.
 				frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(id)
-				if c.dragPreview != nil && (cur.x >= r.W || cur.y >= r.H) {
+				if geometry.tree != w.tree && (cur.x >= r.W || cur.y >= r.H) {
 					frame.CursorVisible = false
 				}
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
 				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
-				Active: id == w.activePane && (!w.zoomed || c.displayPanes),
+				Active: id == w.activePane && (geometry.zoom == nil || c.displayPanesOpen),
 			})
 		}
 
@@ -270,21 +212,21 @@ func (c *compositor) compose(s *session, cols, rows int, forceFull bool) protoco
 			}
 			setCell(x, y, ch, color, c.chrome.background, 0)
 		}
-		if !w.zoomed {
+		if geometry.zoom == nil {
 			for _, b := range borders {
 				frame.Splitters = append(frame.Splitters, protocol.Splitter{ID: b.ID, X: b.X, Y: b.Y, Len: b.Len, Vertical: b.Vertical})
 			}
 		}
 
-		if w.zoomed {
+		if z := geometry.zoom; z != nil {
 			frame.Splitters = nil // the overlay covers the drag handles
 			// While pane numbers are visible, show the underlying split
 			// layout for this client instead of the floating zoom overlay.
 			// Session PTY sizes stay unchanged; the display is transient.
-			if !c.displayPanes {
+			if !c.displayPanesOpen {
 				// Zoom is a floating overlay: the split panes and their borders
 				// remain visible in a 2% margin around all four sides.
-				outer, inner := zoomRects(area.W, area.H)
+				outer, inner := z.outer, z.inner
 				for y := outer.Y; y < outer.Bottom(); y++ {
 					for x := outer.X; x < outer.Right(); x++ {
 						setCell(x, y, ' ', c.chrome.text, c.chrome.background, 0)
@@ -435,49 +377,6 @@ func borderTouchesRect(x, y int, m uint8, r layout.Rect) bool {
 	return false
 }
 
-type vtCursor struct {
-	x, y    int
-	visible bool
-}
-
-// vtRuneWidth reports how many terminal columns a rune occupies. vt10x stores
-// one cell per rune regardless of width, and combining marks on their own
-// still have to claim a column, so anything below one counts as one.
-func vtRuneWidth(ch rune) int {
-	w := uniseg.StringWidth(string(ch))
-	if w < 1 {
-		return 1
-	}
-	return w
-}
-
-func (p *pane) vtCursor() vtCursor {
-	p.vt.Lock()
-	defer p.vt.Unlock()
-	cur := p.vt.Cursor()
-	vis := p.vt.CursorVisible()
-	// blitPane expands double-width runes into two columns, so the caret
-	// column must go through the same expansion or it lands on the wrong
-	// cell whenever the row contains wide characters.
-	return vtCursor{x: renderedCursorColumn(p.vt, cur.X, cur.Y), y: cur.Y, visible: vis}
-}
-
-// vtColor translates a vt10x color into the protocol's color encoding.
-// vt10x reserves values at and above DefaultFG for default colors, stores
-// palette indexes below 256, and stores 24-bit RGB values as 0xRRGGBB. Very
-// dark RGB values are indistinguishable from palette indexes in vt10x, so they
-// retain their palette interpretation.
-func vtColor(c vt10x.Color) int32 {
-	switch {
-	case c >= vt10x.DefaultFG:
-		return protocol.ColorDefault
-	case c <= 0xff:
-		return int32(c)
-	default:
-		return protocol.RGBColor(int32(c>>16), int32(c>>8), int32(c))
-	}
-}
-
 // blitPane copies the pane's virtual screen into the cell buffer. mapColor
 // applies the active theme to each foreground/background protocol color.
 func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pane, r layout.Rect, mapColor func(int32, bool) int32) {
@@ -485,61 +384,23 @@ func blitPane(setCell func(x, y int, ch rune, fg, bg int32, style uint8), p *pan
 		mapColor = func(c int32, _ bool) int32 { return c }
 	}
 	p.vt.Lock()
+	defer p.vt.Unlock()
 	cols, rows := p.vt.Size()
 	for y := 0; y < r.H && y < rows; y++ {
-		// vt10x keeps one vt cell per rune, while the pane grid is measured in
-		// terminal columns. Double-width runes expand into two rendered cells
-		// and every later cell shifts right, so rx tracks the rendered column
-		// of the current vt cell.
-		rx := 0
-		for x := 0; x < cols && rx < r.W; x++ {
-			g := p.vt.Cell(x, y)
-			ch := g.Char
+		projectVTRow(p.vt, y, cols, r.W, func(x int, cell copyCell) {
+			// Copy buffers skip a wide glyph's continuation. A frame needs
+			// a painted space there, in the original glyph's colors.
+			ch := cell.Ch
 			if ch == 0 {
 				ch = ' '
 			}
-			fg, bg := mapColor(vtColor(g.FG), true), mapColor(vtColor(g.BG), false)
-			var st uint8
-			if g.Mode&gttrBold != 0 {
-				st |= protocol.StyleBold
-			}
-			if g.Mode&gttrItalic != 0 {
-				st |= protocol.StyleItalic
-			}
-			if g.Mode&gttrUnderline != 0 {
-				st |= protocol.StyleUnderline
-			}
-			if g.Mode&gttrBlink != 0 {
-				st |= protocol.StyleBlink
-			}
-			if g.Mode&gttrReverse != 0 {
-				st |= protocol.StyleReverse
-			}
-			w := vtRuneWidth(ch)
-			if rx+w > r.W {
-				// The rune does not fit in the pane's final column, so the
-				// rest of the row is clipped at the right edge. Keep the
-				// leftover column in the glyph's colors rather than letting a
-				// default-background cell stay behind.
-				setCell(r.X+rx, r.Y+y, ' ', fg, bg, st)
-				break
-			}
-			setCell(r.X+rx, r.Y+y, ch, fg, bg, st)
-			for k := 1; k < w; k++ {
-				// Trailing half-cells keep the glyph's colors. A plain default
-				// cell here would paint a stray gap after every double-width
-				// rune; Vim's BCE scroll leaves the background alive in that
-				// position, so it must survive blitting.
-				setCell(r.X+rx+k, r.Y+y, ' ', fg, bg, st)
-			}
-			rx += w
-		}
+			setCell(r.X+x, r.Y+y, ch, mapColor(cell.FG, true), mapColor(cell.BG, false), cell.Style)
+		})
 	}
-	p.vt.Unlock()
 }
 
 // diff compares the new grid against the previous one and returns the frame.
-func (c *compositor) diff(grid []protocol.Cell, forceFull bool, frame protocol.Frame) protocol.Frame {
+func (c *frameDiff) diff(grid []protocol.Cell, forceFull bool, frame protocol.Frame) protocol.Frame {
 	cols, rows := frame.Cols, frame.Rows
 	sizeChanged := !c.haveLast || c.lastCols != cols || c.lastRows != rows || len(c.last) != len(grid)
 	full := forceFull || sizeChanged

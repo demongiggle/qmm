@@ -487,12 +487,12 @@ func (s *Server) openCopyMode(c *clientConn, scrollUp int) {
 	// buffer in view so the live screen maps onto the pane as the user left it.
 	st.top = st.maxTop()
 	st.ensureVisible()
-	// Copy mode is exclusive: close any other local overlay first.
-	c.helpOpen = false
-	c.settingsOpen = false
+	// A pending session switcher survives underneath the pane's copy view.
+	if c.menu != menuSessions {
+		c.setMenu(menuNone)
+	}
 	c.displayPanesOpen = false
 	c.confirmOpen = false
-	c.resetLayoutsMenu()
 	c.copyMode = st
 	c.forceFull = true
 	c.clearRepeat()
@@ -500,6 +500,28 @@ func (s *Server) openCopyMode(c *clientConn, scrollUp int) {
 		st.scrollBy(-scrollUp)
 	}
 	s.broadcast()
+}
+
+// copyModeConsumesAction lets selection and wheel events reach the copy
+// handlers. A gesture outside the pane closes its copy view before normal
+// dispatch continues.
+func (s *Server) copyModeConsumesAction(c *clientConn, action any) bool {
+	switch msg := action.(type) {
+	case protocol.ActionWheel, protocol.ActionSelectUpdate:
+	case protocol.ActionSelectStart:
+		if !c.copyMode.covers(msg.X, msg.Y) {
+			s.closeCopyMode(c)
+		}
+	case protocol.ActionFocus:
+		if !c.copyMode.covers(msg.X, msg.Y) {
+			s.closeCopyMode(c)
+		}
+	case protocol.ActionSelectWindow, protocol.ActionDragStart, protocol.ActionTogglePaneZoom:
+		s.closeCopyMode(c)
+	default:
+		return true
+	}
+	return false
 }
 
 func (s *Server) closeCopyMode(c *clientConn) {

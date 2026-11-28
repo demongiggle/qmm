@@ -20,8 +20,8 @@ func layoutsMenuFixture() []savedLayout {
 
 func TestLayoutsMenuRender(t *testing.T) {
 	sess := newTestSession()
-	var comp compositor
-	comp.layoutsOpen = true
+	var comp clientView
+	comp.setMenu(menuLayouts)
 	comp.layoutsList = layoutsMenuFixture()
 	comp.layoutsCursor = 0
 	frame := comp.compose(sess, 80, 24, true)
@@ -70,7 +70,7 @@ func TestLayoutsMenuOpensFromPrefixAndIsPerClient(t *testing.T) {
 		t.Fatal("prefix L is not registered")
 	}
 	fireBinding(s, c1, "L")
-	if !c1.layoutsOpen {
+	if c1.menu != menuLayouts {
 		t.Fatal("prefix L did not open the layout menu")
 	}
 	if c1.frame == nil || c2.frame == nil {
@@ -174,7 +174,7 @@ func TestLayoutsMenuAutoNameAndInputSwallowing(t *testing.T) {
 
 func TestLayoutsMenuMoveClampsAndClearsPrompt(t *testing.T) {
 	s, c := newHelpServer(80, 24)
-	c.layoutsOpen = true
+	c.setMenu(menuLayouts)
 	c.layoutsList = layoutsMenuFixture()
 	c.layoutsCursor = 0
 	c.layoutsMessage = "status"

@@ -37,7 +37,7 @@ func cellAt(f protocol.Frame, x, y int) protocol.Cell {
 
 func TestComposeTooSmall(t *testing.T) {
 	s := newTestSession()
-	comp := &compositor{}
+	comp := &clientView{}
 	f := comp.compose(s, 20, 5, true)
 	var text strings.Builder
 	for _, c := range f.Cells {
@@ -52,7 +52,7 @@ func TestComposeTooSmall(t *testing.T) {
 
 func TestComposeSplitFrame(t *testing.T) {
 	s := newTestSession()
-	comp := &compositor{}
+	comp := &clientView{}
 	f := comp.compose(s, 80, 24, true)
 	if !f.Full {
 		t.Fatal("expected full frame")
@@ -90,7 +90,7 @@ func TestComposePreservesPaneAndWindowColors(t *testing.T) {
 		t.Fatalf("write RGB pane output: %v", err)
 	}
 
-	f := (&compositor{}).compose(s, 80, 24, true)
+	f := (&clientView{}).compose(s, 80, 24, true)
 
 	// Pane output: 256-color palette and text attributes.
 	paletteCell := cellAt(f, 0, 0)
@@ -156,7 +156,7 @@ func TestComposeZoomFrame(t *testing.T) {
 		t.Fatalf("write underlying pane: %v", err)
 	}
 
-	comp := &compositor{}
+	comp := &clientView{}
 	f := comp.compose(s, 80, 24, true)
 
 	corners := []struct {
@@ -243,7 +243,7 @@ func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
 	s := newTestSession()
 	s.opts().setByID(settingCursorShape, 2)
 	s.opts().setByID(settingCursorBlink, 0)
-	comp := &compositor{}
+	comp := &clientView{}
 
 	full := comp.compose(s, 80, 24, true)
 	if full.CursorShape != protocol.CursorShapeBar || !full.CursorBlink {
@@ -253,7 +253,7 @@ func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
 	if incremental.CursorShape != protocol.CursorShapeBar || !incremental.CursorBlink {
 		t.Fatalf("incremental frame cursor = shape:%d blink:%v, want blinking bar", incremental.CursorShape, incremental.CursorBlink)
 	}
-	comp.settingsOpen = true
+	comp.setMenu(menuSettings)
 	overlay := comp.compose(s, 80, 24, true)
 	if overlay.CursorShape != protocol.CursorShapeBar || !overlay.CursorBlink {
 		t.Fatalf("overlay frame cursor = shape:%d blink:%v, want blinking bar", overlay.CursorShape, overlay.CursorBlink)
@@ -266,7 +266,7 @@ func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
 func TestComposeEraseAboveRepaintsFirstLineBackground(t *testing.T) {
 	s := newTestSession()
 	p := s.panes[1]
-	comp := &compositor{}
+	comp := &clientView{}
 
 	// Initial screen with Normal background 235. The first line holds text that
 	// must disappear when the application later erases above the cursor.
@@ -300,7 +300,7 @@ func TestComposeEraseAboveRepaintsFirstLineBackground(t *testing.T) {
 func TestComposePreservesBackgroundOnVimLineScroll(t *testing.T) {
 	s := newTestSession()
 	p := s.panes[1]
-	comp := &compositor{}
+	comp := &clientView{}
 
 	// Initial full-screen draw with Normal background 235 (matching vim's
 	// startup / Ctrl+F / Ctrl+B clear sequence).
@@ -330,7 +330,7 @@ func TestComposePreservesBackgroundOnVimLineScroll(t *testing.T) {
 func TestComposeWideGlyphHalfCellsKeepBackground(t *testing.T) {
 	s := newTestSession()
 	p := s.panes[1]
-	comp := &compositor{}
+	comp := &clientView{}
 
 	// Mixed double-width runes and plain ASCII with Normal background 235.
 	// vt10x keeps one cell per rune: 日本語A行 sit in vt columns 0..5, but
@@ -371,7 +371,7 @@ func TestComposeWideGlyphHalfCellsKeepBackground(t *testing.T) {
 func TestComposeWideGlyphScrollKeepsBackground(t *testing.T) {
 	s := newTestSession()
 	p := s.panes[1]
-	comp := &compositor{}
+	comp := &clientView{}
 
 	// Initial full-screen draw with Normal background 235, then a real vim
 	// DECSTBM line scroll: the freshly exposed row must keep BG 235, and the
@@ -422,7 +422,7 @@ func TestComposeWideGlyphRightEdgeClip(t *testing.T) {
 	// columns 0..39.
 	s.panes[1] = &pane{id: 1, vt: vt10x.New(vt10x.WithSize(40, 23))}
 	s.panes[2] = &pane{id: 2, vt: vt10x.New(vt10x.WithSize(40, 23))}
-	comp := &compositor{}
+	comp := &clientView{}
 
 	// 19 double-width runes fill columns 0..37, one space sits at 38, and a
 	// 20th double-width rune straddles column 39.
@@ -464,7 +464,7 @@ func TestComposeWideGlyphCaretStaysInsidePane(t *testing.T) {
 	s.active = 0
 	s.panes[1] = &pane{id: 1, vt: vt10x.New(vt10x.WithSize(60, 23))}
 	s.panes[2] = &pane{id: 2, vt: vt10x.New(vt10x.WithSize(60, 23))}
-	comp := &compositor{}
+	comp := &clientView{}
 
 	var row []rune
 	for i := 0; i < 30; i++ {

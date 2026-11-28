@@ -10,13 +10,14 @@ const (
 	tabspaces = 8
 )
 
+// Visual attributes exposed through Glyph.Mode.
 const (
-	attrReverse = 1 << iota
-	attrUnderline
-	attrBold
+	AttrReverse = 1 << iota
+	AttrUnderline
+	AttrBold
 	attrGfx
-	attrItalic
-	attrBlink
+	AttrItalic
+	AttrBlink
 	attrWrap
 )
 
@@ -264,11 +265,11 @@ func (t *State) setChar(c rune, attr *Glyph, x, y int) {
 	t.dirty[y] = true
 	t.lines[y][x] = *attr
 	t.lines[y][x].Char = c
-	//if t.options.BrightBold && attr.Mode&attrBold != 0 && attr.FG < 8 {
-	if attr.Mode&attrBold != 0 && attr.FG < 8 {
+	//if t.options.BrightBold && attr.Mode&AttrBold != 0 && attr.FG < 8 {
+	if attr.Mode&AttrBold != 0 && attr.FG < 8 {
 		t.lines[y][x].FG = attr.FG + 8
 	}
-	if attr.Mode&attrReverse != 0 {
+	if attr.Mode&AttrReverse != 0 {
 		t.lines[y][x].FG = attr.BG
 		t.lines[y][x].BG = attr.FG
 	}
@@ -611,29 +612,29 @@ func (t *State) setAttr(attr []int) {
 		a := attr[i]
 		switch a {
 		case 0:
-			t.cur.Attr.Mode &^= attrReverse | attrUnderline | attrBold | attrItalic | attrBlink
+			t.cur.Attr.Mode &^= AttrReverse | AttrUnderline | AttrBold | AttrItalic | AttrBlink
 			t.cur.Attr.FG = DefaultFG
 			t.cur.Attr.BG = DefaultBG
 		case 1:
-			t.cur.Attr.Mode |= attrBold
+			t.cur.Attr.Mode |= AttrBold
 		case 3:
-			t.cur.Attr.Mode |= attrItalic
+			t.cur.Attr.Mode |= AttrItalic
 		case 4:
-			t.cur.Attr.Mode |= attrUnderline
+			t.cur.Attr.Mode |= AttrUnderline
 		case 5, 6: // slow, rapid blink
-			t.cur.Attr.Mode |= attrBlink
+			t.cur.Attr.Mode |= AttrBlink
 		case 7:
-			t.cur.Attr.Mode |= attrReverse
+			t.cur.Attr.Mode |= AttrReverse
 		case 21, 22:
-			t.cur.Attr.Mode &^= attrBold
+			t.cur.Attr.Mode &^= AttrBold
 		case 23:
-			t.cur.Attr.Mode &^= attrItalic
+			t.cur.Attr.Mode &^= AttrItalic
 		case 24:
-			t.cur.Attr.Mode &^= attrUnderline
+			t.cur.Attr.Mode &^= AttrUnderline
 		case 25, 26:
-			t.cur.Attr.Mode &^= attrBlink
+			t.cur.Attr.Mode &^= AttrBlink
 		case 27:
-			t.cur.Attr.Mode &^= attrReverse
+			t.cur.Attr.Mode &^= AttrReverse
 		case 38:
 			if i+2 < len(attr) && attr[i+1] == 5 {
 				i += 2

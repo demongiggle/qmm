@@ -92,7 +92,7 @@ func TestPrefixQShowsStyledPaneNumbers(t *testing.T) {
 }
 
 func TestDisplayPanesFitsSmallTerminal(t *testing.T) {
-	comp := &compositor{displayPanes: true}
+	comp := &clientView{displayPanesOpen: true}
 	f := comp.compose(newTestSession(), 40, 10, true)
 	text := frameText(f)
 	for _, want := range []string{"███", "╭", "0-1"} {
@@ -104,7 +104,7 @@ func TestDisplayPanesFitsSmallTerminal(t *testing.T) {
 		t.Error("small pane-number overlay should hide the pane cursor")
 	}
 
-	tooSmall := (&compositor{displayPanes: true}).compose(newTestSession(), 20, 5, true)
+	tooSmall := (&clientView{displayPanesOpen: true}).compose(newTestSession(), 20, 5, true)
 	if strings.Contains(frameText(tooSmall), "███") {
 		t.Error("pane numbers should not cover the terminal-too-small notice")
 	}

@@ -34,7 +34,7 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	}
 	s, c := newHelpServer(80, 24)
 	fireBinding(s, c, "s")
-	if !c.settingsOpen {
+	if c.menu != menuSettings {
 		t.Fatal("prefix s did not open settings")
 	}
 	if c.frame == nil {
@@ -119,7 +119,7 @@ func TestSettingsNavigationAndAdjustment(t *testing.T) {
 		t.Fatalf("Home cursor = %d, want 0", c.settingsCursor)
 	}
 	s.handleInput(c, []byte("q"))
-	if c.settingsOpen {
+	if c.menu == menuSettings {
 		t.Fatal("q did not close settings")
 	}
 	if text := frameText(*c.frame); strings.Contains(text, "QMM SETTINGS") {
@@ -161,7 +161,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 }
 
 func TestSettingsPageSkipsTooSmallTerminal(t *testing.T) {
-	f := (&compositor{settingsOpen: true}).compose(newTestSession(), 20, 5, true)
+	f := (&clientView{menuView: menuView{menu: menuSettings}}).compose(newTestSession(), 20, 5, true)
 	text := frameText(f)
 	if strings.Contains(text, "QMM SETTINGS") {
 		t.Errorf("settings page covered the terminal-too-small notice:\n%s", text)
@@ -207,13 +207,13 @@ func TestSettingsViewScalesWithFutureOptions(t *testing.T) {
 
 func TestSettingsValuesAffectBehavior(t *testing.T) {
 	t.Run("status bar clock", func(t *testing.T) {
-		on := (&compositor{}).compose(newTestSession(), 80, 24, true)
+		on := (&clientView{}).compose(newTestSession(), 80, 24, true)
 		if cellAt(on, 72, 23).Ch == ' ' {
 			t.Fatal("default status bar is missing the clock")
 		}
 		s := newTestSession()
 		s.opts().setByID(settingStatusClock, 1)
-		off := (&compositor{}).compose(s, 80, 24, true)
+		off := (&clientView{}).compose(s, 80, 24, true)
 		if got := cellAt(off, 72, 23).Ch; got != ' ' {
 			t.Fatalf("clock hidden cell = %q, want blank", got)
 		}
@@ -221,14 +221,14 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 
 	t.Run("status bar color", func(t *testing.T) {
 		s := newTestSession()
-		f := (&compositor{}).compose(s, 80, 24, true)
+		f := (&clientView{}).compose(s, 80, 24, true)
 		// Column 60 is empty bar, past the single window tab and before the clock.
 		if got := cellAt(f, 60, 23).BG; got != colBarBG {
 			t.Fatalf("default status bar BG = %d, want the Slate palette %d", got, colBarBG)
 		}
 		navy := statusColorIndex(t, "Navy")
 		s.opts().setByID(settingStatusBarColor, statusSettingIndex(t, "Navy"))
-		f = (&compositor{}).compose(s, 80, 24, true)
+		f = (&clientView{}).compose(s, 80, 24, true)
 		if got := cellAt(f, 60, 23).BG; got != statusBarColors[navy].bg {
 			t.Fatalf("status bar BG = %d, want Navy %d", got, statusBarColors[navy].bg)
 		}
@@ -244,7 +244,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 	t.Run("active border color", func(t *testing.T) {
 		s := newTestSession()
 		s.opts().setByID(settingBorderColor, accentSettingIndex(t, "Cyan"))
-		f := (&compositor{}).compose(s, 80, 24, true)
+		f := (&clientView{}).compose(s, 80, 24, true)
 		if got := cellAt(f, 40, 5).FG; got != 39 {
 			t.Fatalf("active border FG = %d, want cyan 39", got)
 		}
@@ -255,13 +255,13 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 
 	t.Run("cursor shape and blink", func(t *testing.T) {
 		s := newTestSession()
-		f := (&compositor{}).compose(s, 80, 24, true)
+		f := (&clientView{}).compose(s, 80, 24, true)
 		if f.CursorShape != protocol.CursorShapeBlock || f.CursorBlink {
 			t.Fatalf("default cursor = shape:%d blink:%v, want steady block", f.CursorShape, f.CursorBlink)
 		}
 		s.opts().setByID(settingCursorShape, 2)
 		s.opts().setByID(settingCursorBlink, 0)
-		f = (&compositor{settingsOpen: true}).compose(s, 80, 24, true)
+		f = (&clientView{menuView: menuView{menu: menuSettings}}).compose(s, 80, 24, true)
 		if f.CursorShape != protocol.CursorShapeBar || !f.CursorBlink {
 			t.Fatalf("configured cursor = shape:%d blink:%v, want blinking bar", f.CursorShape, f.CursorBlink)
 		}
@@ -334,7 +334,7 @@ func TestSettingsInputIsSwallowedAndActionsDismiss(t *testing.T) {
 
 	fireBinding(s, c, "s")
 	s.handleInput(c, []byte("echo should-not-run\n"))
-	if !c.settingsOpen {
+	if c.menu != menuSettings {
 		t.Fatal("unknown key closed the settings page")
 	}
 	raw, err := os.ReadFile(f.Name())
@@ -346,7 +346,7 @@ func TestSettingsInputIsSwallowedAndActionsDismiss(t *testing.T) {
 	}
 
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionFocus{X: 0, Y: 0}})
-	if c.settingsOpen || w.activePane != 2 {
+	if c.menu == menuSettings || w.activePane != 2 {
 		t.Fatal("mouse focus leaked through the settings page")
 	}
 }
@@ -367,7 +367,7 @@ func TestSettingsOverlayIsPerClientButValuesAreShared(t *testing.T) {
 		t.Error("settings page leaked to another attached client")
 	}
 
-	c2.settingsOpen = true
+	c2.setMenu(menuSettings)
 	c2.forceFull = true
 	s.broadcast()
 	for c1.settingsCursor < settingCursorIndex(t, settingBorderColor) {

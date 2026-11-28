@@ -31,7 +31,7 @@ func TestPrefixQuestionOpensStyledHelp(t *testing.T) {
 	}
 	s, c := newHelpServer(80, 24)
 	fireBinding(s, c, "?")
-	if !c.helpOpen {
+	if c.menu != menuHelp {
 		t.Fatal("prefix ? did not open help")
 	}
 	if c.frame == nil {
@@ -79,7 +79,7 @@ func TestHelpOverlayIsPerClient(t *testing.T) {
 	c2 := newHelpClient()
 	s.clients[c2] = struct{}{}
 
-	c1.helpOpen = true
+	c1.setMenu(menuHelp)
 	c1.forceFull = true
 	s.broadcast()
 
@@ -100,30 +100,30 @@ func TestHelpInputScrollsAndDismisses(t *testing.T) {
 	if maxTop == 0 {
 		t.Fatal("expected a scrollable help menu at 40x10")
 	}
-	c.helpOpen = true
+	c.setMenu(menuHelp)
 	c.forceFull = true
 	s.broadcast()
 
 	s.handleHelpInput(c, []byte("\x1b[B"))
-	if !c.helpOpen || c.helpTop != 1 {
-		t.Fatalf("down arrow = open:%v top:%d, want open:true top:1", c.helpOpen, c.helpTop)
+	if c.menu != menuHelp || c.helpTop != 1 {
+		t.Fatalf("down arrow = open:%v top:%d, want open:true top:1", c.menu == menuHelp, c.helpTop)
 	}
 	s.handleHelpInput(c, []byte("\x1bOB")) // SS3 down-arrow encoding
-	if !c.helpOpen || c.helpTop != 2 {
-		t.Fatalf("SS3 down arrow = open:%v top:%d, want open:true top:2", c.helpOpen, c.helpTop)
+	if c.menu != menuHelp || c.helpTop != 2 {
+		t.Fatalf("SS3 down arrow = open:%v top:%d, want open:true top:2", c.menu == menuHelp, c.helpTop)
 	}
 	s.handleHelpInput(c, []byte("\x1b[6~"))
 	if want := min(2+page, maxTop); c.helpTop != want {
 		t.Fatalf("page down top = %d, want %d", c.helpTop, want)
 	}
 	s.handleHelpInput(c, []byte("q"))
-	if c.helpOpen {
+	if c.menu == menuHelp {
 		t.Fatal("q did not close help")
 	}
 }
 
 func TestHelpOverlayClampsScrollOnSmallTerminal(t *testing.T) {
-	comp := &compositor{helpOpen: true, helpTop: 999}
+	comp := &clientView{menuView: menuView{menu: menuHelp, helpTop: 999}}
 	f := comp.compose(newTestSession(), 40, 10, true)
 	_, want := helpScrollMetrics(40, 10)
 	if comp.helpTop != want {

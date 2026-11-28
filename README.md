@@ -444,6 +444,9 @@ attached clients exit with it. This shell-driven exit is not prompted.
 
 ## Under the hood
 
+Find the entry points, state owners and tests for each flow in the
+[server architecture map](docs/architecture.md).
+
 ```text
 qmm (client)  ──gob over unix socket──▶  qmm server (detached daemon)
    tcell UI                                  owns PTYs, vt10x terminals,

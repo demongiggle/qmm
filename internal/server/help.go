@@ -100,36 +100,28 @@ type helpView struct {
 type helpSetCell func(x, y int, ch rune, fg, bg int32, style uint8)
 
 // openHelp, closeHelp and toggleHelp keep help local to one attached client.
-// Each client owns a compositor so one user's overlay never covers another
-// user's screen.
 func (s *Server) openHelp(c *clientConn) {
-	if c.helpOpen {
+	if c.menu == menuHelp {
 		return
 	}
-	c.helpOpen = true
-	c.helpTop = 0
-	c.settingsOpen = false
-	c.sessionsOpen = false
-	c.sessionsNaming = false
-	c.resetLayoutsMenu()
+	c.setMenu(menuHelp)
 	c.forceFull = true
 	c.clearRepeat()
 	s.broadcast()
 }
 
 func (s *Server) closeHelp(c *clientConn) {
-	if !c.helpOpen {
+	if c.menu != menuHelp {
 		return
 	}
-	c.helpOpen = false
-	c.helpTop = 0
+	c.setMenu(menuNone)
 	c.forceFull = true
 	c.clearRepeat()
 	s.broadcast()
 }
 
 func (s *Server) toggleHelp(c *clientConn) {
-	if c.helpOpen {
+	if c.menu == menuHelp {
 		s.closeHelp(c)
 		return
 	}
@@ -140,7 +132,7 @@ func (s *Server) toggleHelp(c *clientConn) {
 // scroll a compact, single-column layout; every other key closes the menu and
 // is swallowed so it cannot reach the pane underneath.
 func (s *Server) handleHelpInput(c *clientConn, data []byte) {
-	if !c.helpOpen {
+	if c.menu != menuHelp {
 		s.handleInput(c, data)
 		return
 	}

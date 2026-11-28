@@ -1,9 +1,7 @@
 package server
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +15,6 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/demongiggle/qmm/internal/layout"
-	"github.com/demongiggle/qmm/internal/protocol"
 	"github.com/demongiggle/qmm/internal/vt10x"
 )
 
@@ -337,31 +334,6 @@ func (p *pane) notifyExit(ch chan int) {
 	})
 }
 
-func (p *pane) readLoop(exitCh chan int, onOutput func()) {
-	// Tee the raw PTY bytes into the scrollback recorder while vt10x parses
-	// them. The recorder only models line scrolling; the copy-mode buffer gets
-	// its visible rows directly from vt10x below.
-	br := bufio.NewReaderSize(io.TeeReader(p.ptmx, p.sb), 32*1024)
-	for {
-		if err := p.vt.Parse(br); err != nil {
-			p.notifyExit(exitCh)
-			return
-		}
-		// Resync the recorder with vt10x after every parsed chunk. The
-		// recorder only needs to notice lines that scroll off; starting each
-		// chunk from the real screen keeps uncommon escape sequences from
-		// accumulating drift.
-		lines, cx, cy := p.vtSnapshot()
-		p.sb.SetScreen(lines, cx, cy)
-		// Drain the entire buffered PTY chunk before scheduling a render so
-		// applications that hide/redraw/show the cursor in one write (such
-		// as watch or ncurses) don't emit intermediate cursor-hidden frames.
-		if br.Buffered() == 0 && onOutput != nil {
-			onOutput()
-		}
-	}
-}
-
 // kill sends SIGHUP to the pane's foreground process group (like a terminal
 // hangup) and closes the master side of the PTY. Falls back to signalling the
 // direct child if the group signal fails.
@@ -395,176 +367,6 @@ func (s *session) newWindow(cols, rows int) (*window, error) {
 		}
 	}
 	return w, nil
-}
-
-// zoomMarginPercent is the margin left on each side of a floating zoomed
-// pane, measured against the content area (the status bar stays visible).
-const zoomMarginPercent = 2
-
-// zoomRects returns the centered overlay's outer border rectangle and its
-// inner content rectangle. Margins are rounded up to whole cells so every
-// side keeps at least zoomMarginPercent of the content area.
-func zoomRects(cols, rows int) (outer, inner layout.Rect) {
-	margin := func(size int) int {
-		if size < 1 {
-			return 0
-		}
-		// Integer ceiling of size*zoomMarginPercent/100, with a one-cell
-		// minimum. Clamp it so a tiny area still has a border and content.
-		m := max(1, (size*zoomMarginPercent+99)/100)
-		if maxMargin := (size - 3) / 2; maxMargin >= 0 && m > maxMargin {
-			m = maxMargin
-		}
-		return max(0, m)
-	}
-	mx, my := margin(cols), margin(rows)
-	outer = layout.Rect{X: mx, Y: my, W: max(0, cols-2*mx), H: max(0, rows-2*my)}
-	inner = outer
-	if outer.W > 1 {
-		inner.X++
-	}
-	if outer.H > 1 {
-		inner.Y++
-	}
-	inner.W, inner.H = max(0, outer.W-2), max(0, outer.H-2)
-	return outer, inner
-}
-
-// relayout recomputes PTY/vt sizes for every pane of every window.
-// cols/rows is the *content* size (excluding the status bar row). Panes keep
-// their normal split sizes; in a zoomed window the active pane is resized to
-// the floating overlay instead.
-func (s *session) relayout(cols, rows int) {
-	for _, w := range s.windows {
-		bounds := layout.Rect{X: 0, Y: 0, W: cols, H: rows}
-		_, zoomInner := zoomRects(cols, rows)
-		for id, r := range w.tree.Compute(bounds) {
-			p := s.panes[id]
-			if p == nil {
-				continue
-			}
-			pw, ph := r.W, r.H
-			if w.zoomed && id == w.activePane {
-				pw, ph = zoomInner.W, zoomInner.H
-			}
-			resizePane(p, max(pw, 1), max(ph, 1))
-		}
-	}
-}
-
-func resizePane(p *pane, cols, rows int) {
-	if p.ptmx != nil {
-		_ = pty.Setsize(p.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
-	}
-	p.vt.Resize(cols, rows)
-	if p.sb != nil {
-		p.sb.Resize(cols, rows)
-	}
-}
-
-// vtSnapshot copies the pane's current vt10x screen and cursor position.
-// Lines are expressed in terminal columns, the same space the scrollback
-// recorder uses: a double-width rune owns two cells and a zero-rune
-// placeholder marks its second half. The whole copy buffer then shares one
-// coordinate system, so a screen column maps 1:1 onto a buffer column.
-func (p *pane) vtSnapshot() ([]copyLine, int, int) {
-	p.vt.Lock()
-	defer p.vt.Unlock()
-	cols, rows := p.vt.Size()
-	cur := p.vt.Cursor()
-	out := make([]copyLine, rows)
-	for y := 0; y < rows; y++ {
-		cells := make([]copyCell, cols)
-		for i := range cells {
-			cells[i] = blankCopyCell()
-		}
-		cx := 0
-		for x := 0; x < cols && cx < cols; x++ {
-			g := p.vt.Cell(x, y)
-			ch := g.Char
-			if ch == 0 {
-				ch = ' '
-			}
-			var st uint8
-			if g.Mode&gttrBold != 0 {
-				st |= protocol.StyleBold
-			}
-			if g.Mode&gttrItalic != 0 {
-				st |= protocol.StyleItalic
-			}
-			if g.Mode&gttrUnderline != 0 {
-				st |= protocol.StyleUnderline
-			}
-			if g.Mode&gttrBlink != 0 {
-				st |= protocol.StyleBlink
-			}
-			if g.Mode&gttrReverse != 0 {
-				st |= protocol.StyleReverse
-			}
-			// A rune whose second half falls past the right edge is clipped
-			// to a plain cell, like a terminal would clip it.
-			w := vtRuneWidth(ch)
-			if cx+w > cols {
-				w = cols - cx
-				ch = ' '
-			}
-			cells[cx] = copyCell{Ch: ch, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
-			for k := 1; k < w; k++ {
-				// Placeholder: copyLine.text skips it, and the line renderer
-				// paints it as the wide rune's blank second half.
-				cells[cx+k] = copyCell{Ch: 0, FG: vtColor(g.FG), BG: vtColor(g.BG), Style: st}
-			}
-			cx += w
-		}
-		out[y] = copyLine{cells: cells}
-	}
-	return out, renderedCursorColumn(p.vt, cur.X, cur.Y), cur.Y
-}
-
-// renderedCursorColumn maps a vt10x cursor column onto the terminal-column
-// layout the copy buffer and the pane renderer use. vt10x advances one cell
-// per rune, so the caret must be expanded by the widths of the runes before
-// it. Callers must hold the vt lock.
-func renderedCursorColumn(vt vt10x.Terminal, col, row int) int {
-	cols, rows := vt.Size()
-	if row < 0 || row >= rows {
-		return col
-	}
-	x := 0
-	for i := 0; i < col && i < cols; i++ {
-		ch := vt.Cell(i, row).Char
-		if ch == 0 {
-			ch = ' '
-		}
-		x += vtRuneWidth(ch)
-	}
-	return clampInt(x, 0, cols-1)
-}
-
-// copyBuffer returns scrollback plus the live screen, oldest line first.
-func (p *pane) copyBuffer() []copyLine {
-	lines, _ := p.copyBufferAtCursor()
-	return lines
-}
-
-// copyBufferAtCursor returns the copy buffer along with the pane's cursor
-// mapped into it. Copy mode starts on that point, so entering it lands on the
-// line the user was typing at instead of the bottom of the buffer.
-func (p *pane) copyBufferAtCursor() ([]copyLine, copyPoint) {
-	if p == nil {
-		return nil, copyPoint{}
-	}
-	lines := []copyLine{}
-	if p.sb != nil {
-		lines = append(lines, p.sb.History()...)
-	}
-	history := len(lines)
-	visible, curX, curY := p.vtSnapshot()
-	lines = append(lines, visible...)
-	// The live screen sits at the bottom of the buffer, so the cursor's screen
-	// row maps onto the same row of the snapshot regardless of scrollback.
-	cursor := copyPoint{line: history + curY, col: curX}
-	return lines, cursor
 }
 
 // activePane returns the active pane of the active window, or nil.

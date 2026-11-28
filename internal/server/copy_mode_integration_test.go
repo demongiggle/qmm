@@ -167,8 +167,10 @@ func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
 		t.Fatal("expected Welcome")
 	}
 
-	if err := c.codec.Send(protocol.Input{Data: []byte("echo MOUSESEL-MARKER\n")}); err != nil {
-		t.Fatalf("echo marker: %v", err)
+	// The PTY echoes the command before the shell executes it. Split the
+	// marker across two arguments so only actual output can start selection.
+	if err := c.codec.Send(protocol.Input{Data: []byte("printf '%s%s\\n' MOUSESEL- MARKER\n")}); err != nil {
+		t.Fatalf("print marker: %v", err)
 	}
 	c.waitForScreen(func(text string) bool {
 		return strings.Contains(text, "MOUSESEL-MARKER")
@@ -204,7 +206,7 @@ func TestMouseSelectionCopiesIntoClipboardIntegration(t *testing.T) {
 	}
 
 	// Live mode is restored: the pane receives input again.
-	if err := c.codec.Send(protocol.Input{Data: []byte("echo AFTER-MOUSE-SELECT\n")}); err != nil {
+	if err := c.codec.Send(protocol.Input{Data: []byte("printf '%s%s\\n' AFTER- MOUSE-SELECT\n")}); err != nil {
 		t.Fatalf("type after copy: %v", err)
 	}
 	c.waitForScreen(func(text string) bool {
