@@ -397,61 +397,6 @@ func (s *session) newWindow(cols, rows int) (*window, error) {
 	return w, nil
 }
 
-// zoomMarginPercent is the margin left on each side of a floating zoomed
-// pane, measured against the content area (the status bar stays visible).
-const zoomMarginPercent = 2
-
-// zoomRects returns the centered overlay's outer border rectangle and its
-// inner content rectangle. Margins are rounded up to whole cells so every
-// side keeps at least zoomMarginPercent of the content area.
-func zoomRects(cols, rows int) (outer, inner layout.Rect) {
-	margin := func(size int) int {
-		if size < 1 {
-			return 0
-		}
-		// Integer ceiling of size*zoomMarginPercent/100, with a one-cell
-		// minimum. Clamp it so a tiny area still has a border and content.
-		m := max(1, (size*zoomMarginPercent+99)/100)
-		if maxMargin := (size - 3) / 2; maxMargin >= 0 && m > maxMargin {
-			m = maxMargin
-		}
-		return max(0, m)
-	}
-	mx, my := margin(cols), margin(rows)
-	outer = layout.Rect{X: mx, Y: my, W: max(0, cols-2*mx), H: max(0, rows-2*my)}
-	inner = outer
-	if outer.W > 1 {
-		inner.X++
-	}
-	if outer.H > 1 {
-		inner.Y++
-	}
-	inner.W, inner.H = max(0, outer.W-2), max(0, outer.H-2)
-	return outer, inner
-}
-
-// relayout recomputes PTY/vt sizes for every pane of every window.
-// cols/rows is the *content* size (excluding the status bar row). Panes keep
-// their normal split sizes; in a zoomed window the active pane is resized to
-// the floating overlay instead.
-func (s *session) relayout(cols, rows int) {
-	for _, w := range s.windows {
-		bounds := layout.Rect{X: 0, Y: 0, W: cols, H: rows}
-		_, zoomInner := zoomRects(cols, rows)
-		for id, r := range w.tree.Compute(bounds) {
-			p := s.panes[id]
-			if p == nil {
-				continue
-			}
-			pw, ph := r.W, r.H
-			if w.zoomed && id == w.activePane {
-				pw, ph = zoomInner.W, zoomInner.H
-			}
-			resizePane(p, max(pw, 1), max(ph, 1))
-		}
-	}
-}
-
 func resizePane(p *pane, cols, rows int) {
 	if p.ptmx != nil {
 		_ = pty.Setsize(p.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})

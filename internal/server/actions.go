@@ -132,10 +132,6 @@ func (s *Server) killPaneNow(paneID int) {
 	}
 }
 
-func (s *Server) contentRect() layout.Rect {
-	return layout.Rect{X: 0, Y: 0, W: s.cols, H: s.rows - statusRows}
-}
-
 func (s *Server) detachClient(c *clientConn, reason string) {
 	if _, ok := s.clients[c]; !ok {
 		return
@@ -197,8 +193,7 @@ func (s *Server) focusAt(x, y int) {
 	if w == nil || w.zoomed {
 		return
 	}
-	bounds := s.contentRect()
-	for id, r := range w.tree.Compute(bounds) {
+	for id, r := range s.paneRects() {
 		if r.Contains(x, y) {
 			if id != w.activePane {
 				w.activePane = id
@@ -220,8 +215,8 @@ func (s *Server) selectWindow(i int) {
 }
 
 func (s *Server) newWindow() {
-	cols, rows := s.cols, s.rows-statusRows
-	if _, err := s.sess.newWindow(cols, rows); err != nil {
+	area := s.contentRect()
+	if _, err := s.sess.newWindow(area.W, area.H); err != nil {
 		return
 	}
 	s.relayout()
@@ -229,7 +224,8 @@ func (s *Server) newWindow() {
 }
 
 func (s *Server) splitActive(dir layout.Direction) {
-	if _, err := s.sess.splitActivePane(s.cols, s.rows-statusRows, dir); err != nil {
+	area := s.contentRect()
+	if _, err := s.sess.splitActivePane(area.W, area.H, dir); err != nil {
 		return
 	}
 	s.relayout()

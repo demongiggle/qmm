@@ -337,13 +337,8 @@ func (s *Server) restoreLayout(c *clientConn, l savedLayout) error {
 		return err
 	}
 
-	cols, rows := s.cols, s.rows-statusRows
-	if cols < 1 {
-		cols = 1
-	}
-	if rows < 1 {
-		rows = 1
-	}
+	area := s.contentRect()
+	cols, rows := max(1, area.W), max(1, area.H)
 
 	ids := make([]int, 0, len(l.Panes))
 	cleanup := func() {

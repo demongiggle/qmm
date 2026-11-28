@@ -221,27 +221,6 @@ func (s *Server) dropSelections() {
 	}
 }
 
-// paneRects maps the active window's pane IDs to their on-screen viewport. A
-// zoomed window draws its single pane inside the floating overlay.
-func (s *Server) paneRects() map[int]layout.Rect {
-	out := map[int]layout.Rect{}
-	w := s.activeWindow()
-	if w == nil {
-		return out
-	}
-	area := s.contentRect()
-	if w.zoomed {
-		if _, inner := zoomRects(area.W, area.H); s.sess.panes[w.activePane] != nil {
-			out[w.activePane] = inner
-		}
-		return out
-	}
-	for id, r := range w.tree.Compute(area) {
-		out[id] = r
-	}
-	return out
-}
-
 // drawSelection blits a pane's frozen snapshot with the selection highlighted.
 // Only the pane's own cells are replaced; the rest of the layout stays live.
 func (c *compositor) drawSelection(setCell helpSetCell, st *selectionState, r layout.Rect) {

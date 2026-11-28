@@ -143,7 +143,7 @@ func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protoco
 		return render()
 	}
 
-	area := layout.Rect{X: 0, Y: 0, W: cols, H: rows - statusRows}
+	area := paneArea(cols, rows)
 
 	var marks map[int]uint8 // cellIndex -> bitmask 1=vert 2=horiz
 
@@ -151,12 +151,9 @@ func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protoco
 	var haveActive bool
 
 	if w != nil {
-		tree := w.tree
-		if c.drag != nil && c.drag.preview != nil {
-			tree = c.drag.preview
-		}
-		rects := tree.Compute(area)
-		borders := tree.Borders(area)
+		geometry := v.frameGeometry(w, area)
+		rects := geometry.splitRects()
+		borders := geometry.tree.Borders(area)
 
 		for id, r := range rects {
 			p := s.panes[id]
@@ -175,19 +172,19 @@ func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protoco
 			if id == w.activePane {
 				activeRect, haveActive = r, true
 			}
-			if id == w.activePane && !w.zoomed {
+			if id == w.activePane && geometry.zoom == nil {
 				cur := p.vtCursor()
 				frame.CursorX, frame.CursorY = r.X+clampInt(cur.x, 0, r.W-1), r.Y+cur.y
 				// A frozen snapshot has no live caret, and a copy view
 				// replaces the pane's cells with scrollback.
 				frame.CursorVisible = cur.visible && !selected && !c.copyModeCovers(id)
-				if c.drag != nil && c.drag.preview != nil && (cur.x >= r.W || cur.y >= r.H) {
+				if geometry.tree != w.tree && (cur.x >= r.W || cur.y >= r.H) {
 					frame.CursorVisible = false
 				}
 			}
 			frame.Panes = append(frame.Panes, protocol.PaneRect{
 				ID: id, Number: paneNumbers[id], X: r.X, Y: r.Y, W: r.W, H: r.H,
-				Active: id == w.activePane && (!w.zoomed || c.displayPanesOpen),
+				Active: id == w.activePane && (geometry.zoom == nil || c.displayPanesOpen),
 			})
 		}
 
@@ -227,13 +224,13 @@ func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protoco
 			}
 			setCell(x, y, ch, color, c.chrome.background, 0)
 		}
-		if !w.zoomed {
+		if geometry.zoom == nil {
 			for _, b := range borders {
 				frame.Splitters = append(frame.Splitters, protocol.Splitter{ID: b.ID, X: b.X, Y: b.Y, Len: b.Len, Vertical: b.Vertical})
 			}
 		}
 
-		if w.zoomed {
+		if z := geometry.zoom; z != nil {
 			frame.Splitters = nil // the overlay covers the drag handles
 			// While pane numbers are visible, show the underlying split
 			// layout for this client instead of the floating zoom overlay.
@@ -241,7 +238,7 @@ func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protoco
 			if !c.displayPanesOpen {
 				// Zoom is a floating overlay: the split panes and their borders
 				// remain visible in a 2% margin around all four sides.
-				outer, inner := zoomRects(area.W, area.H)
+				outer, inner := z.outer, z.inner
 				for y := outer.Y; y < outer.Bottom(); y++ {
 					for x := outer.X; x < outer.Right(); x++ {
 						setCell(x, y, ' ', c.chrome.text, c.chrome.background, 0)

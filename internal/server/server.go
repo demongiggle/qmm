@@ -438,18 +438,6 @@ func (s *Server) recomputeSize() bool {
 	return true
 }
 
-func (s *Server) relayout() {
-	// A real layout change invalidates any previews based on the old geometry.
-	for c := range s.clients {
-		c.drag = nil
-	}
-	contentRows := s.rows - statusRows
-	if contentRows < 1 {
-		contentRows = 1
-	}
-	s.sess.relayout(s.cols, contentRows)
-}
-
 // scheduleRender asks the event loop to recompose+send. Non-blocking.
 func (s *Server) scheduleRender() {
 	select {
