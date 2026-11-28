@@ -157,3 +157,34 @@ func TestCopyLineTextTrimsAndSkipsWidePlaceholders(t *testing.T) {
 		t.Fatalf("trimmed width = %d, want 3", len(got.cells))
 	}
 }
+
+func TestScrollbackTopRegionAndHistoryControls(t *testing.T) {
+	p := &pane{}
+	p.initTerminal(10, 4)
+	write := func(s string) {
+		t.Helper()
+		if _, err := io.WriteString(p.vt, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkFirst := func() {
+		t.Helper()
+		if got := scrollbackTexts(&p.sb); len(got) != 1 || got[0] != "first" {
+			t.Fatalf("history = %q, want only first", got)
+		}
+	}
+
+	write("first\r\nsecond\r\nthird\r\nfourth")
+	write("\x1b[1;2r\x1b[1S") // scroll only the top two rows
+	checkFirst()
+	write("\x1b[H\x1b[M") // delete at row zero
+	checkFirst()
+	write("\x1b[?1049h\x1b[3J\x1b[2S\x1b[?1049l")
+	checkFirst()
+
+	snapshot := p.copyBuffer()
+	write("\x1b[3J")
+	if len(p.sb.History()) != 0 || snapshot[0].text() != "first" {
+		t.Fatal("clearing main-screen history should preserve the open copy buffer")
+	}
+}
