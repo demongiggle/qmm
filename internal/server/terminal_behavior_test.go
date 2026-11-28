@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
-// Feed the same byte stream as a pane PTY without a shell, or a socket
+// Feed the same byte stream as a pane PTY without a shell or socket
 // connection. Synchronize on the real pane read loop's render notification.
 func newPaneOutputFixture(t *testing.T) (*Server, *clientConn, func(string)) {
 	t.Helper()
@@ -67,6 +68,123 @@ func requireFrameRow(t *testing.T, frame protocol.Frame, y int, want string) {
 	}
 	if got := strings.TrimRight(row.String(), " "); got != want {
 		t.Errorf("frame row %d = %q, want %q", y, got, want)
+	}
+}
+
+func TestPaneOutputCompletesSplitCSIBeforeRenderingAndRecording(t *testing.T) {
+	s, c, output := newPaneOutputFixture(t)
+	// Each call waits for the input chunk to be parsed and for a frame.
+	output("\x1b[1;38;5;")
+	requireFrameRow(t, behaviorFrame(t, c), 0, "")
+	output("196m歷史\x1b[0m")
+	frame := behaviorFrame(t, c)
+	requireFrameRow(t, frame, 0, "歷 史")
+	if cell := cellAt(frame, 0, 0); cell.FG != 196 || cell.Style&protocol.StyleBold == 0 {
+		t.Fatalf("live cell = %+v, want bold text with palette index 196", cell)
+	}
+	output(strings.Repeat("\r\nnext", 9))
+	sendBehaviorInput(s, c, "\x01[", "g", "g")
+	frame = behaviorFrame(t, c)
+	requireFrameRow(t, frame, 0, "歷 史")
+	if cell := cellAt(frame, 2, 0); cell.FG != 196 || cell.Style&protocol.StyleBold == 0 {
+		t.Errorf("history cell = %+v, want the original bold text and color", cell)
+	}
+	sendBehaviorInput(s, c, "y")
+	if clip, ok := queuedClipboard(c); !ok || clip.Text != "歷史" {
+		t.Fatalf("clipboard from styled history = %#v, want 歷史", clip)
+	}
+}
+
+func TestPaneOutputShrinkAndGrowKeepsVisibleTailAndExistingHistory(t *testing.T) {
+	s, c, output := newPaneOutputFixture(t)
+	s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 52, Rows: 14}})
+	var lines []string
+	for i := 1; i <= 13; i++ {
+		lines = append(lines, fmt.Sprintf("main-%02d", i))
+	}
+	lastRow := strings.Repeat("x", 40)
+	lines = append(lines, lastRow+"cropped")
+	output(strings.Join(lines, "\r\n"))
+	requireFrameRow(t, behaviorFrame(t, c), 0, "main-02")
+	requireFrameRow(t, behaviorFrame(t, c), 12, lastRow+"cropped")
+
+	s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 40, Rows: 10}})
+	small := behaviorFrame(t, c)
+	requireFrameRow(t, small, 0, "main-06")
+	requireFrameRow(t, small, 8, lastRow)
+	if small.CursorX != 39 || small.CursorY != 8 || !small.CursorVisible {
+		t.Fatalf("cursor after shrink = (%d,%d), visible=%t", small.CursorX, small.CursorY, small.CursorVisible)
+	}
+	s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 52, Rows: 14}})
+	grown := behaviorFrame(t, c)
+	requireFrameRow(t, grown, 0, "main-06")
+	requireFrameRow(t, grown, 8, lastRow)
+	requireFrameRow(t, grown, 9, "")
+	requireFrameRow(t, grown, 12, "")
+	if grown.CursorX != small.CursorX || grown.CursorY != small.CursorY {
+		t.Error("growing the pane moved the cursor")
+	}
+
+	sendBehaviorInput(s, c, "\x01[", "g", "g")
+	frame := behaviorFrame(t, c)
+	requireFrameRow(t, frame, 0, "main-01")
+	requireFrameRow(t, frame, 1, "main-06")
+	if !strings.Contains(frameText(frame), "line 1/14") {
+		t.Error("resize created new scrollback entries for the clipped rows")
+	}
+}
+
+func TestPaneOutputResizesWhileAlternateScreenIsActive(t *testing.T) {
+	for _, mode := range []struct {
+		decMode     string
+		savesCursor bool
+	}{
+		{"1049", true},
+		{"1047", false},
+		{"47", false},
+	} {
+		t.Run(mode.decMode, func(t *testing.T) {
+			s, c, output := newPaneOutputFixture(t)
+			s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 52, Rows: 14}})
+			var lines []string
+			for i := 1; i <= 14; i++ {
+				lines = append(lines, fmt.Sprintf("main-%02d", i))
+			}
+			output(strings.Join(lines, "\r\n") + "\x1b[3;7H")
+			main := behaviorFrame(t, c)
+			output("\x1b[?" + mode.decMode + "h\x1b[Halt-first\r\nalt-second")
+
+			s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 40, Rows: 10}})
+			alt := behaviorFrame(t, c)
+			requireFrameRow(t, alt, 0, "alt-first")
+			requireFrameRow(t, alt, 1, "alt-second")
+			output("\x1b[9;1H" + strings.Repeat("alt-scroll\r\n", 3) + "alt-tail")
+			s.handleClientMessage(clientMsg{c, protocol.Resize{Cols: 50, Rows: 13}})
+			alt = behaviorFrame(t, c)
+			requireFrameRow(t, alt, 8, "alt-tail")
+			requireFrameRow(t, alt, 9, "")
+
+			output("\x1b[?" + mode.decMode + "l")
+			restored := behaviorFrame(t, c)
+			requireFrameRow(t, restored, 0, "main-02")
+			requireFrameRow(t, restored, 8, "main-10")
+			requireFrameRow(t, restored, 9, "")
+			wantCursor := alt
+			if mode.savesCursor {
+				wantCursor = main
+			}
+			if restored.CursorX != wantCursor.CursorX || restored.CursorY != wantCursor.CursorY {
+				t.Errorf("cursor after leaving mode %s = (%d,%d), want (%d,%d)", mode.decMode, restored.CursorX, restored.CursorY, wantCursor.CursorX, wantCursor.CursorY)
+			}
+
+			sendBehaviorInput(s, c, "\x01[", "g", "g")
+			buffer := behaviorFrame(t, c)
+			requireFrameRow(t, buffer, 0, "main-01")
+			requireFrameRow(t, buffer, 1, "main-02")
+			if text := frameText(buffer); !strings.Contains(text, "line 1/13") || strings.Contains(text, "alt-") {
+				t.Fatalf("alternate screen affected normal scrollback:\n%s", text)
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package vt10x
 
 import (
+	"bufio"
 	"io"
 	"strings"
 	"testing"
@@ -25,6 +26,28 @@ func TestPlainChars(t *testing.T) {
 	actual := extractStr(term, 0, len(expected)-1, 0)
 	if expected != actual {
 		t.Fatal(actual)
+	}
+}
+
+func TestParseRetainsUTF8AcrossReadBoundaries(t *testing.T) {
+	term := New(WithSize(10, 2))
+	// MultiReader supplies each part in a separate read.
+	input := bufio.NewReader(io.MultiReader(
+		strings.NewReader("A\xe7"),
+		strings.NewReader("\x95"),
+		strings.NewReader("\x8cZ"),
+	))
+	for {
+		err := term.Parse(input)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := extractStr(term, 0, 2, 0); got != "A界Z" {
+		t.Fatalf("screen text = %q, want A界Z", got)
 	}
 }
 

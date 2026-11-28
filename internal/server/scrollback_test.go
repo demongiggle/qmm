@@ -86,6 +86,22 @@ func TestScrollbackCSIAndSGR(t *testing.T) {
 	}
 }
 
+func TestScrollbackRetainsWideRuneSplitAcrossWrites(t *testing.T) {
+	r := newScrollback(10, 2)
+	for _, chunk := range []string{"A\xe7", "\x95", "\x8cZ\r", "\nsecond", "\r", "\n"} {
+		if _, err := r.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines := r.History()
+	if len(lines) != 1 || lines[0].text() != "A界Z" {
+		t.Fatalf("history = %q, want one line A界Z", scrollbackTexts(r))
+	}
+	if cells := lines[0].cells; len(cells) != 4 || cells[1].Ch != '界' || cells[2].Ch != 0 || cells[3].Ch != 'Z' {
+		t.Fatalf("history cells = %+v, want A, 界, wide placeholder, Z", cells)
+	}
+}
+
 func TestScrollbackResyncAndResize(t *testing.T) {
 	r := newScrollback(10, 2)
 	writeScrollbackLines(r, 3, "x")
