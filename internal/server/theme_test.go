@@ -267,6 +267,23 @@ status_line_color = "Blue"
 		}
 	})
 
+	t.Run("present empty theme keeps explicit old colors", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(path, []byte(`[appearance]
+theme = ""
+status_bar_color = "Slate"
+`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		st, warning := loadConfig(path)
+		if warning != nil {
+			t.Fatalf("load config: %+v", warning)
+		}
+		if got, ok := st.paletteOverride(settingStatusBarColor); !ok || got != statusColorIndex(t, "Slate") {
+			t.Errorf("empty theme should keep explicit Slate, got %d/%v", got, ok)
+		}
+	})
+
 	t.Run("custom values stay explicit", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.toml")
 		body := `[appearance]
@@ -303,15 +320,15 @@ status_line_color = "Olive"
 		if warning == nil {
 			t.Fatal("invalid theme did not produce a config warning")
 		}
-		var fc fileConfig
+		var fc map[string]map[string]string
 		if _, err := toml.DecodeFile(path, &fc); err != nil {
 			t.Fatalf("recovered config invalid: %v", err)
 		}
 		if got := st.themePalette().ID; got != "default" {
 			t.Fatalf("fallback theme = %q, want default", got)
 		}
-		if fc.Appearance.Theme != "default" {
-			t.Fatalf("recovered config theme = %q, want default", fc.Appearance.Theme)
+		if fc["appearance"]["theme"] != "default" {
+			t.Fatalf("recovered config theme = %q, want default", fc["appearance"]["theme"])
 		}
 	})
 }
@@ -340,11 +357,11 @@ func TestSettingsCycleThemeLiveAndPersist(t *testing.T) {
 	if got := cellAt(*c.frame, 0, 23).BG; got != want.bg {
 		t.Fatalf("status bar BG = %#x, want theme %#x", got, want.bg)
 	}
-	var fc fileConfig
+	var fc map[string]map[string]string
 	if _, err := toml.DecodeFile(s.configPath, &fc); err != nil {
 		t.Fatalf("decode saved config: %v", err)
 	}
-	if fc.Appearance.Theme != "catppuccin-mocha" {
-		t.Fatalf("saved theme = %q", fc.Appearance.Theme)
+	if fc["appearance"]["theme"] != "catppuccin-mocha" {
+		t.Fatalf("saved theme = %q", fc["appearance"]["theme"])
 	}
 }

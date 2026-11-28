@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/BurntSushi/toml"
 )
 
 // configWarning describes a config failure that must be shown to the user.
@@ -16,49 +14,6 @@ type configWarning struct {
 	Reason     string
 	BackupPath string
 	ConfigPath string
-}
-
-// fileConfig is the on-disk TOML representation of every settings-page row.
-// Values are the same human-readable strings shown by the settings UI.
-type fileConfig struct {
-	Appearance appearanceConfig `toml:"appearance"`
-	Panes      panesConfig      `toml:"panes"`
-	Layout     layoutConfig     `toml:"layout"`
-	Session    sessionConfig    `toml:"session"`
-	Copy       copyConfig       `toml:"copy"`
-}
-
-type appearanceConfig struct {
-	Theme            string `toml:"theme"`
-	StatusBarClock   string `toml:"status_bar_clock"`
-	StatusBarColor   string `toml:"status_bar_color"`
-	ActivePaneBorder string `toml:"active_pane_border"`
-	CursorShape      string `toml:"cursor_shape"`
-	CursorBlink      string `toml:"cursor_blink"`
-}
-
-type panesConfig struct {
-	PaneNumberTimeout string `toml:"pane_number_timeout"`
-	DoubleClickZoom   string `toml:"double_click_zoom"`
-}
-
-type layoutConfig struct {
-	KeyboardResizeStep   string `toml:"keyboard_resize_step"`
-	AutomaticWindowNames string `toml:"automatic_window_names"`
-}
-
-type sessionConfig struct {
-	ConfirmShutdown string `toml:"confirm_shutdown"`
-}
-
-type copyConfig struct {
-	StatusLineColor string `toml:"status_line_color"`
-	CopyKey         string `toml:"copy_key"`
-}
-
-type configSetting struct {
-	id    settingID
-	value string
 }
 
 func configFilePath() (string, error) {
@@ -74,88 +29,6 @@ func configFilePath() (string, error) {
 		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "qmm", "config.toml"), nil
-}
-
-func settingText(st *settingsState, id settingID) string {
-	def, ok := settingByID(id)
-	if !ok {
-		return ""
-	}
-	return st.text(def)
-}
-
-func configFromSettings(st *settingsState) fileConfig {
-	st.ensure()
-	return fileConfig{
-		Appearance: appearanceConfig{
-			Theme:            settingText(st, settingTheme),
-			StatusBarClock:   settingText(st, settingStatusClock),
-			StatusBarColor:   settingText(st, settingStatusBarColor),
-			ActivePaneBorder: settingText(st, settingBorderColor),
-			CursorShape:      settingText(st, settingCursorShape),
-			CursorBlink:      settingText(st, settingCursorBlink),
-		},
-		Panes: panesConfig{
-			PaneNumberTimeout: settingText(st, settingPaneNumberTime),
-			DoubleClickZoom:   settingText(st, settingDoubleClickZoom),
-		},
-		Layout: layoutConfig{
-			KeyboardResizeStep:   settingText(st, settingResizeStep),
-			AutomaticWindowNames: settingText(st, settingAutoNameWindows),
-		},
-		Session: sessionConfig{
-			ConfirmShutdown: settingText(st, settingConfirmShutdown),
-		},
-		Copy: copyConfig{
-			StatusLineColor: settingText(st, settingCopyStatusColor),
-			CopyKey:         settingText(st, settingCopyKey),
-		},
-	}
-}
-
-func (fc fileConfig) orderedSettings() []configSetting {
-	return []configSetting{
-		{settingTheme, fc.Appearance.Theme},
-		{settingStatusClock, fc.Appearance.StatusBarClock},
-		{settingStatusBarColor, fc.Appearance.StatusBarColor},
-		{settingBorderColor, fc.Appearance.ActivePaneBorder},
-		{settingCursorShape, fc.Appearance.CursorShape},
-		{settingCursorBlink, fc.Appearance.CursorBlink},
-		{settingPaneNumberTime, fc.Panes.PaneNumberTimeout},
-		{settingDoubleClickZoom, fc.Panes.DoubleClickZoom},
-		{settingResizeStep, fc.Layout.KeyboardResizeStep},
-		{settingAutoNameWindows, fc.Layout.AutomaticWindowNames},
-		{settingConfirmShutdown, fc.Session.ConfirmShutdown},
-		{settingCopyStatusColor, fc.Copy.StatusLineColor},
-		{settingCopyKey, fc.Copy.CopyKey},
-	}
-}
-
-func settingsFromConfig(fc fileConfig) (settingsState, error) {
-	st := defaultSettings()
-	for _, entry := range fc.orderedSettings() {
-		// Missing keys keep their defaults; unknown TOML keys are ignored by
-		// the decoder and never reach this loop.
-		if entry.value == "" {
-			continue
-		}
-		def, ok := settingByID(entry.id)
-		if !ok {
-			continue
-		}
-		idx := -1
-		for i, allowed := range def.Values {
-			if allowed == entry.value {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			return st, fmt.Errorf("invalid value %q for %q", entry.value, entry.id)
-		}
-		st.values[entry.id] = idx
-	}
-	return st, nil
 }
 
 // writeConfig atomically replaces path with the complete config. Callers keep
@@ -178,7 +51,7 @@ func writeConfig(path string, st *settingsState) error {
 	if err := f.Chmod(0o600); err != nil {
 		return err
 	}
-	if err := toml.NewEncoder(f).Encode(configFromSettings(st)); err != nil {
+	if err := encodeSettings(f, st); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
@@ -235,26 +108,7 @@ func loadConfig(path string) (settingsState, *configWarning) {
 		return defaults, recoverBrokenConfig(path, fmt.Sprintf("could not read config: %v", err))
 	}
 
-	var fc fileConfig
-	md, err := toml.DecodeFile(path, &fc)
-	if err != nil {
-		return defaults, recoverBrokenConfig(path, fmt.Sprintf("could not parse config: %v", err))
-	}
-	// Configs written before themes existed always stored the old default
-	// color choices. Treat those as Theme (inherit) and keep custom choices as
-	// explicit overrides.
-	if !md.IsDefined("appearance", "theme") {
-		if fc.Appearance.StatusBarColor == statusBarNames[0] {
-			fc.Appearance.StatusBarColor = ""
-		}
-		if fc.Appearance.ActivePaneBorder == accentColorNames[0] {
-			fc.Appearance.ActivePaneBorder = ""
-		}
-		if fc.Copy.StatusLineColor == statusBarNames[1] {
-			fc.Copy.StatusLineColor = ""
-		}
-	}
-	st, err := settingsFromConfig(fc)
+	st, err := decodeSettings(path)
 	if err != nil {
 		return defaults, recoverBrokenConfig(path, err.Error())
 	}

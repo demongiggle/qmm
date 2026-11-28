@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,9 +86,62 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	}
 }
 
+// The fixture is a config written in the original format. Keep its wire names
+// independent of the catalog so changing both reader and writer cannot mask a rename.
+func TestSettingsConfigFixture(t *testing.T) {
+	fixture := filepath.Join("testdata", "settings.toml")
+	want := map[settingID]string{
+		settingTheme: "dracula", settingStatusClock: "Off", settingStatusBarColor: "Teal",
+		settingBorderColor: "Pink", settingCursorShape: "Bar", settingCursorBlink: "On",
+		settingPaneNumberTime: "5s", settingDoubleClickZoom: "Off", settingResizeStep: "4 cells",
+		settingAutoNameWindows: "Off", settingConfirmShutdown: "Off",
+		settingCopyStatusColor: "Navy", settingCopyKey: "Ctrl-Insert",
+	}
+	// loadConfig can recover a broken file in place, so load a temporary copy.
+	raw, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loadAndCheck := func() settingsState {
+		t.Helper()
+		st, warning := loadConfig(path)
+		if warning != nil {
+			t.Fatalf("load config: %+v", warning)
+		}
+		for _, section := range settingsSections {
+			for _, def := range section.Options {
+				value, ok := want[def.ID]
+				if !ok || len(def.Values) > 1 && value == def.Values[def.Default] {
+					t.Fatalf("provide a non-default fixture value for %s", def.ID)
+				}
+				if got := st.text(def); got != value {
+					t.Errorf("%s = %q, want %q", def.ID, got, value)
+				}
+			}
+		}
+		return st
+	}
+	st := loadAndCheck()
+	if err := writeConfig(path, &st); err != nil {
+		t.Fatal(err)
+	}
+	loadAndCheck()
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(saved, raw) {
+		t.Errorf("saved config differs from the established format:\n%s", saved)
+	}
+}
+
 func TestLoadConfigIgnoresUnknownAndMissingKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[appearance]\nunknown_key = \"ignored\"\ncursor_shape = \"Bar\"\n"
+	body := "[Appearance]\nunknown_key = [1, 2]\nCURSOR_SHAPE = \"Bar\"\ncursor_blink = \"\"\n[future.options]\nflags = [true]\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write partial config: %v", err)
 	}
@@ -105,8 +159,10 @@ func TestLoadConfigIgnoresUnknownAndMissingKeys(t *testing.T) {
 
 func TestLoadConfigRecoversBrokenFiles(t *testing.T) {
 	cases := map[string]string{
-		"parse error":   "[appearance\ncursor_shape = \"Block\"\n",
-		"invalid value": "[appearance]\ncursor_shape = \"Triangle\"\n",
+		"wrong section type": "appearance = 1\n",
+		"wrong option type":  "[appearance]\ncursor_blink = true\n",
+		"parse error":        "[appearance\ncursor_shape = \"Block\"\n",
+		"invalid value":      "[appearance]\ncursor_shape = \"Triangle\"\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -129,12 +185,12 @@ func TestLoadConfigRecoversBrokenFiles(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read recovered config: %v", err)
 			}
-			var fc fileConfig
+			var fc map[string]map[string]string
 			if _, err := toml.Decode(string(raw), &fc); err != nil {
 				t.Fatalf("recovered config is not valid TOML: %v", err)
 			}
-			if fc.Appearance.CursorShape != "Block" || fc.Appearance.CursorBlink != "Off" {
-				t.Fatalf("recovered defaults = shape:%q blink:%q", fc.Appearance.CursorShape, fc.Appearance.CursorBlink)
+			if fc["appearance"]["cursor_shape"] != "Block" || fc["appearance"]["cursor_blink"] != "Off" {
+				t.Fatalf("recovered defaults = shape:%q blink:%q", fc["appearance"]["cursor_shape"], fc["appearance"]["cursor_blink"])
 			}
 			if st.cursorShape() != protocol.CursorShapeBlock || st.cursorBlink() {
 				t.Fatal("broken config did not fall back to a steady block")
@@ -154,16 +210,18 @@ func TestSettingsAdjustAutoSavesAllValues(t *testing.T) {
 	if c.configWarningOpen {
 		t.Fatalf("auto-save unexpectedly warned: %+v", c.configWarning)
 	}
-	var fc fileConfig
+	var fc map[string]map[string]string
 	if _, err := toml.DecodeFile(s.configPath, &fc); err != nil {
 		t.Fatalf("decode saved config: %v", err)
 	}
-	if fc.Appearance.CursorShape != "Underline" {
-		t.Fatalf("saved cursor shape = %q, want Underline", fc.Appearance.CursorShape)
+	if fc["appearance"]["cursor_shape"] != "Underline" {
+		t.Fatalf("saved cursor shape = %q, want Underline", fc["appearance"]["cursor_shape"])
 	}
-	for _, value := range fc.orderedSettings() {
-		if value.value == "" {
-			t.Errorf("saved config missing value for %q", value.id)
+	for _, section := range settingsSections {
+		for _, def := range section.Options {
+			if fc[section.TOMLTable][def.TOMLKey] == "" {
+				t.Errorf("saved config missing value for %s", def.ID)
+			}
 		}
 	}
 }

@@ -116,6 +116,7 @@ var (
 // are what gets persisted.
 type settingDef struct {
 	ID      settingID
+	TOMLKey string
 	Label   string
 	Values  []string
 	Labels  []string
@@ -123,47 +124,53 @@ type settingDef struct {
 }
 
 type settingsSection struct {
-	Title   string
-	Options []settingDef
+	TOMLTable string
+	Title     string
+	Options   []settingDef
 }
 
 var settingsSections = []settingsSection{
 	{
-		Title: "Appearance",
+		TOMLTable: "appearance",
+		Title:     "Appearance",
 		Options: []settingDef{
-			{ID: settingTheme, Label: "Theme", Values: themeIDs, Labels: themeLabels, Default: 0},
-			{ID: settingStatusClock, Label: "Status bar clock", Values: onOffValues, Default: 0},
-			{ID: settingStatusBarColor, Label: "Status bar color", Values: statusBarNamesWithTheme, Default: 0},
-			{ID: settingBorderColor, Label: "Active pane border", Values: accentColorNamesWithTheme, Default: 0},
-			{ID: settingCursorShape, Label: "Cursor shape", Values: cursorShapeNames, Default: 0},
-			{ID: settingCursorBlink, Label: "Cursor blink", Values: onOffValues, Default: 1},
+			{ID: settingTheme, TOMLKey: "theme", Label: "Theme", Values: themeIDs, Labels: themeLabels, Default: 0},
+			{ID: settingStatusClock, TOMLKey: "status_bar_clock", Label: "Status bar clock", Values: onOffValues, Default: 0},
+			{ID: settingStatusBarColor, TOMLKey: "status_bar_color", Label: "Status bar color", Values: statusBarNamesWithTheme, Default: 0},
+			{ID: settingBorderColor, TOMLKey: "active_pane_border", Label: "Active pane border", Values: accentColorNamesWithTheme, Default: 0},
+			{ID: settingCursorShape, TOMLKey: "cursor_shape", Label: "Cursor shape", Values: cursorShapeNames, Default: 0},
+			{ID: settingCursorBlink, TOMLKey: "cursor_blink", Label: "Cursor blink", Values: onOffValues, Default: 1},
 		},
 	},
 	{
-		Title: "Panes",
+		TOMLTable: "panes",
+		Title:     "Panes",
 		Options: []settingDef{
-			{ID: settingPaneNumberTime, Label: "Pane number timeout", Values: paneTimeoutNames, Default: 0},
-			{ID: settingDoubleClickZoom, Label: "Double-click zoom", Values: onOffValues, Default: 0},
+			{ID: settingPaneNumberTime, TOMLKey: "pane_number_timeout", Label: "Pane number timeout", Values: paneTimeoutNames, Default: 0},
+			{ID: settingDoubleClickZoom, TOMLKey: "double_click_zoom", Label: "Double-click zoom", Values: onOffValues, Default: 0},
 		},
 	},
 	{
-		Title: "Layout",
+		TOMLTable: "layout",
+		Title:     "Layout",
 		Options: []settingDef{
-			{ID: settingResizeStep, Label: "Keyboard resize step", Values: resizeStepNames, Default: 1},
-			{ID: settingAutoNameWindows, Label: "Automatic window names", Values: onOffValues, Default: 0},
+			{ID: settingResizeStep, TOMLKey: "keyboard_resize_step", Label: "Keyboard resize step", Values: resizeStepNames, Default: 1},
+			{ID: settingAutoNameWindows, TOMLKey: "automatic_window_names", Label: "Automatic window names", Values: onOffValues, Default: 0},
 		},
 	},
 	{
-		Title: "Session",
+		TOMLTable: "session",
+		Title:     "Session",
 		Options: []settingDef{
-			{ID: settingConfirmShutdown, Label: "Confirm shutdown", Values: onOffValues, Default: 0},
+			{ID: settingConfirmShutdown, TOMLKey: "confirm_shutdown", Label: "Confirm shutdown", Values: onOffValues, Default: 0},
 		},
 	},
 	{
-		Title: "Copy mode",
+		TOMLTable: "copy",
+		Title:     "Copy mode",
 		Options: []settingDef{
-			{ID: settingCopyStatusColor, Label: "Status line color", Values: statusBarNamesWithTheme, Default: 0},
-			{ID: settingCopyKey, Label: "Copy selection key", Values: copyKeyNames, Default: 0},
+			{ID: settingCopyStatusColor, TOMLKey: "status_line_color", Label: "Status line color", Values: statusBarNamesWithTheme, Default: 0},
+			{ID: settingCopyKey, TOMLKey: "copy_key", Label: "Copy selection key", Values: copyKeyNames, Default: 0},
 		},
 	},
 }
