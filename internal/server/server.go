@@ -188,7 +188,8 @@ func Run(cfg Config) error {
 		_ = os.Remove(s.pid)
 	}()
 
-	if _, err := s.sess.newWindow(s.cols, s.rows); err != nil {
+	area := s.contentRect()
+	if _, err := s.sess.newWindow(area.W, area.H); err != nil {
 		return fmt.Errorf("create initial window: %w", err)
 	}
 
