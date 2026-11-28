@@ -130,7 +130,4 @@ func resizePane(p *pane, cols, rows int) {
 		_ = pty.Setsize(p.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	}
 	p.vt.Resize(cols, rows)
-	if p.sb != nil {
-		p.sb.Resize(cols, rows)
-	}
 }

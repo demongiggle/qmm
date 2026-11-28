@@ -20,7 +20,7 @@ func newPaneOutputFixture(t *testing.T) (*Server, *clientConn, func(string)) {
 	delete(s.sess.panes, 2)
 	s.relayout()
 	p := s.sess.activePane()
-	p.sb = newScrollback(48, 9)
+	p.initTerminal(48, 9)
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestPaneOutputPreservesMainHistoryThroughAlternateScreenAndResize(t *testin
 	copyFrame := behaviorFrame(t, c)
 	requireFrameRow(t, copyFrame, 0, "歷 史 A")
 	requireFrameRow(t, copyFrame, 1, "main-two")
-	if cell := cellAt(copyFrame, 2, 0); cell.FG != 1 || cell.Style&protocol.StyleBold == 0 {
+	if cell := cellAt(copyFrame, 2, 0); cell.FG != 9 || cell.Style&protocol.StyleBold == 0 {
 		t.Errorf("historical cell = %+v, want bold red text", cell)
 	}
 	if strings.Contains(frameText(copyFrame), "alternate-output") {
