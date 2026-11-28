@@ -267,6 +267,23 @@ status_line_color = "Blue"
 		}
 	})
 
+	t.Run("present empty theme keeps explicit old colors", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(path, []byte(`[appearance]
+theme = ""
+status_bar_color = "Slate"
+`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		st, warning := loadConfig(path)
+		if warning != nil {
+			t.Fatalf("load config: %+v", warning)
+		}
+		if got, ok := st.paletteOverride(settingStatusBarColor); !ok || got != statusColorIndex(t, "Slate") {
+			t.Errorf("empty theme should keep explicit Slate, got %d/%v", got, ok)
+		}
+	})
+
 	t.Run("custom values stay explicit", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.toml")
 		body := `[appearance]

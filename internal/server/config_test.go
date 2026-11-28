@@ -106,10 +106,11 @@ func TestSettingsConfigFixture(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for pass := 0; pass < 2; pass++ {
+	loadAndCheck := func() settingsState {
+		t.Helper()
 		st, warning := loadConfig(path)
 		if warning != nil {
-			t.Fatalf("load %d: %+v", pass, warning)
+			t.Fatalf("load config: %+v", warning)
 		}
 		for _, section := range settingsSections {
 			for _, def := range section.Options {
@@ -122,12 +123,13 @@ func TestSettingsConfigFixture(t *testing.T) {
 				}
 			}
 		}
-		if pass == 0 {
-			if err := writeConfig(path, &st); err != nil {
-				t.Fatal(err)
-			}
-		}
+		return st
 	}
+	st := loadAndCheck()
+	if err := writeConfig(path, &st); err != nil {
+		t.Fatal(err)
+	}
+	loadAndCheck()
 	saved, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +141,7 @@ func TestSettingsConfigFixture(t *testing.T) {
 
 func TestLoadConfigIgnoresUnknownAndMissingKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[appearance]\nunknown_key = [1, 2]\nCURSOR_SHAPE = \"Bar\"\ncursor_blink = \"\"\n[future.options]\nflags = [true]\n"
+	body := "[Appearance]\nunknown_key = [1, 2]\nCURSOR_SHAPE = \"Bar\"\ncursor_blink = \"\"\n[future.options]\nflags = [true]\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write partial config: %v", err)
 	}
