@@ -33,6 +33,17 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 		return s.shutdownRequested
 	}
 	c := in.cli
+	if c.drag != nil {
+		switch in.msg.(type) {
+		case protocol.ActionDragStart, protocol.ActionDragUpdate, protocol.ActionDragEnd:
+		default:
+			hadPreview := c.drag.preview != nil
+			c.drag = nil
+			if hadPreview {
+				s.broadcast()
+			}
+		}
+	}
 	// A mouse selection is not modal: only the messages that extend it (drag
 	// updates, wheel steps, and the input that may carry the copy key) keep it
 	// alive. Anything else — focus, window switch, split, resize, detach —
@@ -200,7 +211,7 @@ func (s *Server) handleClientMessage(in clientMsg) bool {
 	case protocol.ActionDragUpdate:
 		s.dragUpdate(c, msg.Splitter, msg.Delta)
 	case protocol.ActionDragEnd:
-		c.dragActive = false
+		s.dragEnd(c, msg.Splitter)
 	case protocol.ActionWheel:
 		s.handleWheel(c, msg.Delta)
 	case protocol.ActionSelectStart:
@@ -478,31 +489,51 @@ func (s *Server) resizePane(direction uint8, delta int) {
 
 func (s *Server) dragStart(c *clientConn, splitterID int) {
 	w := s.activeWindow()
-	if w == nil {
+	if w == nil || w.zoomed || c.drag != nil {
 		return
 	}
 	for _, b := range w.tree.Borders(s.contentRect()) {
 		if b.ID == splitterID {
-			c.dragID = splitterID
-			c.dragActive = true
+			c.drag = &splitterDrag{window: w, splitter: splitterID}
 			return
 		}
 	}
 }
 
 func (s *Server) dragUpdate(c *clientConn, splitterID, delta int) {
-	if !c.dragActive || c.dragID != splitterID || delta == 0 {
+	drag := c.drag
+	if drag == nil || drag.splitter != splitterID || delta == 0 {
 		return
 	}
-	w := s.activeWindow()
-	if w == nil {
+	// Measure from the original layout so returning the pointer also restores
+	// the divider after hitting a pane's minimum size.
+	drag.delta += delta
+	preview := drag.window.tree.Clone()
+	if !preview.ResizeSplit(splitterID, drag.delta, s.contentRect()) {
+		preview = nil
+	}
+	if preview == nil && drag.preview == nil {
 		return
 	}
-	if w.tree.ResizeSplit(splitterID, delta, s.contentRect()) {
-		s.relayout()
-		s.needFull = true
-		s.broadcast()
+	drag.preview = preview
+	s.broadcast()
+}
+
+func (s *Server) dragEnd(c *clientConn, splitterID int) {
+	drag := c.drag
+	if drag == nil || drag.splitter != splitterID {
+		return
 	}
+	c.drag = nil
+	if drag.preview == nil {
+		return
+	}
+	if _, attached := s.clients[c]; !attached {
+		return
+	}
+	drag.window.tree = drag.preview
+	s.relayout()
+	s.broadcast()
 }
 
 // --- input byte stream and prefix machine ---------------------------------

@@ -128,7 +128,7 @@ type ActionDragStart struct {
 	Splitter int
 }
 
-// ActionDragUpdate moves a splitter by Delta cells relative to drag start.
+// ActionDragUpdate moves a splitter by Delta cells since the previous event.
 // Positive deltas move the divider down/right.
 type ActionDragUpdate struct {
 	Splitter int

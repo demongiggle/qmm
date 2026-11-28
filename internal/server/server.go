@@ -96,6 +96,13 @@ type clientMsg struct {
 	msg interface{}
 }
 
+type splitterDrag struct {
+	window   *window
+	splitter int
+	delta    int
+	preview  *layout.Tree
+}
+
 type clientConn struct {
 	conn  net.Conn
 	codec *protocol.Codec
@@ -110,8 +117,7 @@ type clientConn struct {
 	notify chan struct{}
 
 	// Border-drag state (client-initiated).
-	dragID     int
-	dragActive bool
+	drag *splitterDrag
 
 	// Per-client compositor and help-menu state. Help is local to one client.
 	comp      compositor
@@ -305,7 +311,7 @@ func (s *Server) acceptLoop(out chan<- *clientConn) {
 			return
 		}
 		go func() {
-			c := &clientConn{conn: conn, codec: protocol.NewCodec(conn), notify: make(chan struct{}, 1), done: make(chan struct{}), dragID: -1}
+			c := &clientConn{conn: conn, codec: protocol.NewCodec(conn), notify: make(chan struct{}, 1), done: make(chan struct{})}
 			_ = c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 			msg, err := c.codec.Recv()
 			if err != nil {
@@ -500,6 +506,10 @@ func (s *Server) recomputeSize() bool {
 }
 
 func (s *Server) relayout() {
+	// A real layout change invalidates any previews based on the old geometry.
+	for c := range s.clients {
+		c.drag = nil
+	}
 	contentRows := s.rows - statusRows
 	if contentRows < 1 {
 		contentRows = 1
@@ -525,7 +535,15 @@ func (s *Server) broadcast() {
 	// moved the pane (split, zoom, window switch, pane exit), the snapshot is
 	// stale: drop it rather than draw it over the wrong rectangle.
 	var rects map[int]layout.Rect
+	w := s.activeWindow()
 	for c := range s.clients {
+		if c.drag != nil && c.drag.window != w {
+			c.drag = nil
+		}
+		c.comp.dragPreview = nil
+		if c.drag != nil {
+			c.comp.dragPreview = c.drag.preview
+		}
 		if sel := c.selection; sel != nil {
 			if rects == nil {
 				rects = s.paneRects()
