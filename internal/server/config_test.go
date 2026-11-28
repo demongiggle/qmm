@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,9 +86,60 @@ func TestLoadConfigCreatesDefaultsAndRoundTrips(t *testing.T) {
 	}
 }
 
+// The fixture is a config written in the original format. Keep its wire names
+// independent of the catalog so changing both reader and writer cannot mask a rename.
+func TestSettingsConfigFixture(t *testing.T) {
+	fixture := filepath.Join("testdata", "settings.toml")
+	want := map[settingID]string{
+		settingTheme: "dracula", settingStatusClock: "Off", settingStatusBarColor: "Teal",
+		settingBorderColor: "Pink", settingCursorShape: "Bar", settingCursorBlink: "On",
+		settingPaneNumberTime: "5s", settingDoubleClickZoom: "Off", settingResizeStep: "4 cells",
+		settingAutoNameWindows: "Off", settingConfirmShutdown: "Off",
+		settingCopyStatusColor: "Navy", settingCopyKey: "Ctrl-Insert",
+	}
+	// loadConfig can recover a broken file in place, so load a temporary copy.
+	raw, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.toml")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for pass := 0; pass < 2; pass++ {
+		st, warning := loadConfig(path)
+		if warning != nil {
+			t.Fatalf("load %d: %+v", pass, warning)
+		}
+		for _, section := range settingsSections {
+			for _, def := range section.Options {
+				value, ok := want[def.ID]
+				if !ok || len(def.Values) > 1 && value == def.Values[def.Default] {
+					t.Fatalf("provide a non-default fixture value for %s", def.ID)
+				}
+				if got := st.text(def); got != value {
+					t.Errorf("%s = %q, want %q", def.ID, got, value)
+				}
+			}
+		}
+		if pass == 0 {
+			if err := writeConfig(path, &st); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(saved, raw) {
+		t.Errorf("saved config differs from the established format:\n%s", saved)
+	}
+}
+
 func TestLoadConfigIgnoresUnknownAndMissingKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	body := "[appearance]\nunknown_key = \"ignored\"\ncursor_shape = \"Bar\"\n"
+	body := "[appearance]\nunknown_key = [1, 2]\nCURSOR_SHAPE = \"Bar\"\ncursor_blink = \"\"\n[future.options]\nflags = [true]\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write partial config: %v", err)
 	}
@@ -105,8 +157,10 @@ func TestLoadConfigIgnoresUnknownAndMissingKeys(t *testing.T) {
 
 func TestLoadConfigRecoversBrokenFiles(t *testing.T) {
 	cases := map[string]string{
-		"parse error":   "[appearance\ncursor_shape = \"Block\"\n",
-		"invalid value": "[appearance]\ncursor_shape = \"Triangle\"\n",
+		"wrong section type": "appearance = 1\n",
+		"wrong option type":  "[appearance]\ncursor_blink = true\n",
+		"parse error":        "[appearance\ncursor_shape = \"Block\"\n",
+		"invalid value":      "[appearance]\ncursor_shape = \"Triangle\"\n",
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -1,0 +1,22 @@
+[appearance]
+  theme = "dracula"
+  status_bar_clock = "Off"
+  status_bar_color = "Teal"
+  active_pane_border = "Pink"
+  cursor_shape = "Bar"
+  cursor_blink = "On"
+
+[panes]
+  pane_number_timeout = "5s"
+  double_click_zoom = "Off"
+
+[layout]
+  keyboard_resize_step = "4 cells"
+  automatic_window_names = "Off"
+
+[session]
+  confirm_shutdown = "Off"
+
+[copy]
+  status_line_color = "Navy"
+  copy_key = "Ctrl-Insert"
