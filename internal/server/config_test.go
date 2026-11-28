@@ -183,12 +183,12 @@ func TestLoadConfigRecoversBrokenFiles(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read recovered config: %v", err)
 			}
-			var fc fileConfig
+			var fc map[string]map[string]string
 			if _, err := toml.Decode(string(raw), &fc); err != nil {
 				t.Fatalf("recovered config is not valid TOML: %v", err)
 			}
-			if fc.Appearance.CursorShape != "Block" || fc.Appearance.CursorBlink != "Off" {
-				t.Fatalf("recovered defaults = shape:%q blink:%q", fc.Appearance.CursorShape, fc.Appearance.CursorBlink)
+			if fc["appearance"]["cursor_shape"] != "Block" || fc["appearance"]["cursor_blink"] != "Off" {
+				t.Fatalf("recovered defaults = shape:%q blink:%q", fc["appearance"]["cursor_shape"], fc["appearance"]["cursor_blink"])
 			}
 			if st.cursorShape() != protocol.CursorShapeBlock || st.cursorBlink() {
 				t.Fatal("broken config did not fall back to a steady block")
@@ -208,16 +208,18 @@ func TestSettingsAdjustAutoSavesAllValues(t *testing.T) {
 	if c.configWarningOpen {
 		t.Fatalf("auto-save unexpectedly warned: %+v", c.configWarning)
 	}
-	var fc fileConfig
+	var fc map[string]map[string]string
 	if _, err := toml.DecodeFile(s.configPath, &fc); err != nil {
 		t.Fatalf("decode saved config: %v", err)
 	}
-	if fc.Appearance.CursorShape != "Underline" {
-		t.Fatalf("saved cursor shape = %q, want Underline", fc.Appearance.CursorShape)
+	if fc["appearance"]["cursor_shape"] != "Underline" {
+		t.Fatalf("saved cursor shape = %q, want Underline", fc["appearance"]["cursor_shape"])
 	}
-	for _, value := range fc.orderedSettings() {
-		if value.value == "" {
-			t.Errorf("saved config missing value for %q", value.id)
+	for _, section := range settingsSections {
+		for _, def := range section.Options {
+			if fc[section.TOMLTable][def.TOMLKey] == "" {
+				t.Errorf("saved config missing value for %s", def.ID)
+			}
 		}
 	}
 }

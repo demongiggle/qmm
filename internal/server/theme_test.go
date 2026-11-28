@@ -303,15 +303,15 @@ status_line_color = "Olive"
 		if warning == nil {
 			t.Fatal("invalid theme did not produce a config warning")
 		}
-		var fc fileConfig
+		var fc map[string]map[string]string
 		if _, err := toml.DecodeFile(path, &fc); err != nil {
 			t.Fatalf("recovered config invalid: %v", err)
 		}
 		if got := st.themePalette().ID; got != "default" {
 			t.Fatalf("fallback theme = %q, want default", got)
 		}
-		if fc.Appearance.Theme != "default" {
-			t.Fatalf("recovered config theme = %q, want default", fc.Appearance.Theme)
+		if fc["appearance"]["theme"] != "default" {
+			t.Fatalf("recovered config theme = %q, want default", fc["appearance"]["theme"])
 		}
 	})
 }
@@ -340,11 +340,11 @@ func TestSettingsCycleThemeLiveAndPersist(t *testing.T) {
 	if got := cellAt(*c.frame, 0, 23).BG; got != want.bg {
 		t.Fatalf("status bar BG = %#x, want theme %#x", got, want.bg)
 	}
-	var fc fileConfig
+	var fc map[string]map[string]string
 	if _, err := toml.DecodeFile(s.configPath, &fc); err != nil {
 		t.Fatalf("decode saved config: %v", err)
 	}
-	if fc.Appearance.Theme != "catppuccin-mocha" {
-		t.Fatalf("saved theme = %q", fc.Appearance.Theme)
+	if fc["appearance"]["theme"] != "catppuccin-mocha" {
+		t.Fatalf("saved theme = %q", fc["appearance"]["theme"])
 	}
 }
