@@ -253,7 +253,7 @@ func TestComposeCarriesCursorStyleAcrossFrames(t *testing.T) {
 	if incremental.CursorShape != protocol.CursorShapeBar || !incremental.CursorBlink {
 		t.Fatalf("incremental frame cursor = shape:%d blink:%v, want blinking bar", incremental.CursorShape, incremental.CursorBlink)
 	}
-	comp.settingsOpen = true
+	comp.setMenu(menuSettings)
 	overlay := comp.compose(s, 80, 24, true)
 	if overlay.CursorShape != protocol.CursorShapeBar || !overlay.CursorBlink {
 		t.Fatalf("overlay frame cursor = shape:%d blink:%v, want blinking bar", overlay.CursorShape, overlay.CursorBlink)

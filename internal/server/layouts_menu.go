@@ -10,36 +10,13 @@ import (
 	"github.com/demongiggle/qmm/internal/protocol"
 )
 
-// resetLayoutsMenu clears the client-local view state without broadcasting.
-// Other overlay openers use it so only one modal is ever visible.
-func (c *clientConn) resetLayoutsMenu() {
-	c.layoutsOpen = false
-	c.layoutsList = nil
-	c.layoutsCursor = 0
-	c.layoutsTop = 0
-	c.layoutsNaming = false
-	c.layoutsInput = ""
-	c.layoutsError = ""
-	c.layoutsMessage = ""
-	c.layoutsConfirmOverwrite = ""
-	c.layoutsConfirmDelete = ""
-}
-
 // openLayoutsMenu opens the per-client saved-layout menu (prefix+L). It reloads
 // the layouts file first so external edits and saves from other servers appear.
 func (s *Server) openLayoutsMenu(c *clientConn) {
-	if c.layoutsOpen {
+	if c.menu == menuLayouts {
 		return
 	}
-	c.helpOpen = false
-	c.helpTop = 0
 	c.confirmOpen = false
-	c.settingsOpen = false
-	c.sessionsOpen = false
-	c.sessionsLoading = false
-	c.sessionsNaming = false
-	c.sessionsInput = ""
-	c.sessionsError = ""
 	c.displayPanesOpen = false
 	c.displayPanesInput = ""
 	c.displayPanesDeadline = time.Time{}
@@ -50,16 +27,10 @@ func (s *Server) openLayoutsMenu(c *clientConn) {
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()
-	c.resetLayoutsMenu()
 
 	warning := s.reloadLayouts()
-	c.layoutsOpen = true
+	c.setMenu(menuLayouts)
 	c.layoutsList = append([]savedLayout(nil), s.layouts...)
-	c.layoutsCursor = 0
-	c.layoutsTop = 0
-	if len(c.layoutsList) == 0 {
-		c.layoutsCursor = 0 // save row
-	}
 	if warning != nil {
 		c.layoutsError = layoutWarningMessage(*warning)
 	} else if s.layoutsErr != "" {
@@ -70,10 +41,10 @@ func (s *Server) openLayoutsMenu(c *clientConn) {
 }
 
 func (s *Server) closeLayoutsMenu(c *clientConn) {
-	if !c.layoutsOpen {
+	if c.menu != menuLayouts {
 		return
 	}
-	c.resetLayoutsMenu()
+	c.setMenu(menuNone)
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()
@@ -304,7 +275,7 @@ func (s *Server) deleteLayoutNamed(c *clientConn, name string) {
 // delete. preferred selects a row by name when it exists.
 func (s *Server) syncLayoutsMenuClients(preferred string) {
 	for c := range s.clients {
-		if !c.layoutsOpen {
+		if c.menu != menuLayouts {
 			continue
 		}
 		prev := ""

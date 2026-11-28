@@ -52,11 +52,8 @@ func (s *Server) sessionInfo() protocol.SessionInfo {
 // (prefix+S). It renders immediately with the current session and kicks off
 // an asynchronous scan of the socket directory to populate all live sessions.
 func (s *Server) openSessionsMenu(c *clientConn) {
-	c.helpOpen = false
-	c.helpTop = 0
+	c.setMenu(menuSessions)
 	c.confirmOpen = false
-	c.settingsOpen = false
-	c.resetLayoutsMenu()
 	c.displayPanesOpen = false
 	c.displayPanesInput = ""
 	c.displayPanesDeadline = time.Time{}
@@ -64,14 +61,8 @@ func (s *Server) openSessionsMenu(c *clientConn) {
 	c.prefixBuf = nil
 	c.clearRepeat()
 
-	c.sessionsOpen = true
 	c.sessionsLoading = true
 	c.sessionsList = []protocol.SessionInfo{s.sessionInfo()}
-	c.sessionsCursor = 0
-	c.sessionsTop = 0
-	c.sessionsNaming = false
-	c.sessionsInput = ""
-	c.sessionsError = ""
 	c.forceFull = true
 	s.broadcast()
 
@@ -92,7 +83,7 @@ func (s *Server) refreshSessionsMenuAsync(c *clientConn) {
 }
 
 func (s *Server) handleSessionListResult(c *clientConn, res sessionListResult) {
-	if c == nil || !c.sessionsOpen {
+	if c == nil || c.menu != menuSessions {
 		return
 	}
 	// Remember what the cursor pointed to before refreshing so the highlight
@@ -140,14 +131,10 @@ func (s *Server) handleSessionListResult(c *clientConn, res sessionListResult) {
 }
 
 func (s *Server) closeSessionsMenu(c *clientConn) {
-	if !c.sessionsOpen {
+	if c.menu != menuSessions {
 		return
 	}
-	c.sessionsOpen = false
-	c.sessionsLoading = false
-	c.sessionsNaming = false
-	c.sessionsInput = ""
-	c.sessionsError = ""
+	c.setMenu(menuNone)
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()

@@ -69,13 +69,13 @@ func (s *Server) routeOverlay(c *clientConn, msg any) bool {
 		return route(s.handleShutdownConfirmInput, nil)
 	}
 	_, sessionRefresh := msg.(sessionListResult)
-	if c.sessionsOpen && !sessionRefresh {
+	if c.menu == menuSessions && !sessionRefresh {
 		return route(s.handleSessionsMenuInput, s.closeSessionsMenu)
 	}
-	if c.layoutsOpen {
+	if c.menu == menuLayouts {
 		return route(s.handleLayoutsMenuInput, s.closeLayoutsMenu)
 	}
-	if c.settingsOpen {
+	if c.menu == menuSettings {
 		return route(s.handleSettingsInput, s.closeSettings)
 	}
 	if keyboard && s.displayPanesExpired(c) {
@@ -89,7 +89,7 @@ func (s *Server) routeOverlay(c *clientConn, msg any) bool {
 		s.closeWindowGoto(c)
 		return true
 	}
-	if c.helpOpen {
+	if c.menu == menuHelp {
 		return route(s.handleHelpInput, s.closeHelp)
 	}
 	return false

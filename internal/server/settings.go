@@ -574,21 +574,14 @@ func (s *Server) settingsSyncView(c *clientConn) settingsView {
 // openSettings shows the categorized settings page on one client. Like help
 // and confirmation, the view is local; option values are session-wide.
 func (s *Server) openSettings(c *clientConn) {
-	c.helpOpen = false
-	c.helpTop = 0
+	c.setMenu(menuSettings)
 	c.confirmOpen = false
-	c.sessionsOpen = false
-	c.sessionsNaming = false
-	c.resetLayoutsMenu()
 	c.displayPanesOpen = false
 	c.displayPanesInput = ""
 	c.displayPanesDeadline = time.Time{}
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()
-	c.settingsOpen = true
-	c.settingsCursor = 0
-	c.settingsTop = 0
 	s.settingsSyncView(c)
 	c.forceFull = true
 	s.sess.opts().ensure()
@@ -596,10 +589,10 @@ func (s *Server) openSettings(c *clientConn) {
 }
 
 func (s *Server) closeSettings(c *clientConn) {
-	if !c.settingsOpen {
+	if c.menu != menuSettings {
 		return
 	}
-	c.settingsOpen = false
+	c.setMenu(menuNone)
 	c.prefixArmed = false
 	c.prefixBuf = nil
 	c.clearRepeat()

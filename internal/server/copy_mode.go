@@ -487,12 +487,12 @@ func (s *Server) openCopyMode(c *clientConn, scrollUp int) {
 	// buffer in view so the live screen maps onto the pane as the user left it.
 	st.top = st.maxTop()
 	st.ensureVisible()
-	// Copy mode is exclusive: close any other local overlay first.
-	c.helpOpen = false
-	c.settingsOpen = false
+	// A pending session switcher survives underneath the pane's copy view.
+	if c.menu != menuSessions {
+		c.setMenu(menuNone)
+	}
 	c.displayPanesOpen = false
 	c.confirmOpen = false
-	c.resetLayoutsMenu()
 	c.copyMode = st
 	c.forceFull = true
 	c.clearRepeat()

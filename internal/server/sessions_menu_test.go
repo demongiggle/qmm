@@ -30,7 +30,7 @@ func TestSessionsMenuRenderAndInlineNaming(t *testing.T) {
 	}
 
 	var comp clientView
-	comp.sessionsOpen = true
+	comp.setMenu(menuSessions)
 	comp.sessionsList = list
 	comp.sessionsCursor = 0
 	frame := comp.compose(sess, 80, 24, true)

@@ -89,13 +89,13 @@ func (v *clientView) compose(s *session, cols, rows int, forceFull bool) protoco
 			c.drawConfigWarning(&frame, setCell, cols, rows, c.configWarning)
 		} else if c.confirmOpen {
 			c.drawShutdownConfirm(&frame, setCell, cols, rows)
-		} else if c.helpOpen {
+		} else if c.menu == menuHelp {
 			c.drawHelp(&frame, setCell, cols, rows)
-		} else if c.sessionsOpen {
+		} else if c.menu == menuSessions {
 			c.drawSessionsMenu(&frame, setCell, cols, rows, s.sessionName(), opts)
-		} else if c.layoutsOpen {
+		} else if c.menu == menuLayouts {
 			c.drawLayoutsMenu(&frame, setCell, cols, rows, nextLayoutName(c.layoutsList))
-		} else if c.settingsOpen {
+		} else if c.menu == menuSettings {
 			c.drawSettings(&frame, setCell, cols, rows, opts)
 		} else if c.displayPanesOpen {
 			c.drawDisplayPanes(&frame, setCell, cols, rows, showClock)

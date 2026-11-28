@@ -18,7 +18,9 @@ func (s *Server) showConfigWarning(c *clientConn, warning configWarning) {
 	}
 	c.configWarning = warning
 	c.configWarningOpen = true
-	c.resetLayoutsMenu()
+	if c.menu == menuLayouts {
+		c.setMenu(menuNone)
+	}
 	c.forceFull = true
 }
 

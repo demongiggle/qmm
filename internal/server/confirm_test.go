@@ -128,12 +128,12 @@ func TestConfirmationAnswerKeys(t *testing.T) {
 func TestConfirmationDialogReplacesHelp(t *testing.T) {
 	s, c := newHelpServer(80, 24)
 	fireBinding(s, c, "?")
-	if !c.helpOpen {
+	if c.menu != menuHelp {
 		t.Fatal("help did not open")
 	}
 	fireBinding(s, c, "&")
-	if c.helpOpen || !c.confirmOpen {
-		t.Fatalf("help=%v confirm=%v, want help:false confirm:true", c.helpOpen, c.confirmOpen)
+	if c.menu == menuHelp || !c.confirmOpen {
+		t.Fatalf("help=%v confirm=%v, want help:false confirm:true", c.menu == menuHelp, c.confirmOpen)
 	}
 	if c.frame == nil || !strings.Contains(frameText(*c.frame), confirmQuestion) {
 		t.Error("confirmation dialog was not rendered over help")

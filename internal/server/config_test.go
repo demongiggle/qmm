@@ -185,7 +185,7 @@ func TestReloadKeysApplyExternalConfigAndCloseSettings(t *testing.T) {
 				t.Fatalf("edit config: %v", err)
 			}
 			s.handleInput(c, []byte(key))
-			if c.settingsOpen {
+			if c.menu == menuSettings {
 				t.Error("successful reload did not close the settings page")
 			}
 			if c.configWarningOpen {
@@ -218,7 +218,7 @@ func TestBrokenReloadRecoversAndWarnsTriggeringClient(t *testing.T) {
 	if !c.configWarningOpen {
 		t.Fatal("broken reload did not show the warning modal")
 	}
-	if !c.settingsOpen {
+	if c.menu != menuSettings {
 		t.Error("failed reload closed the settings page")
 	}
 	if c.configWarning.BackupPath == "" {

@@ -9,15 +9,12 @@ import (
 // clientView is owned by one attachment on the server event loop. Input
 // handlers and frame composition use the same menu cursors and selections.
 type clientView struct {
+	menuView
 	frames    frameDiff
 	forceFull bool
 
 	// Border-drag state (client-initiated).
 	drag *splitterDrag
-
-	// Help menu scroll position.
-	helpOpen bool
-	helpTop  int
 
 	// Shutdown confirmation is local to the client that pressed prefix+&.
 	confirmOpen bool
@@ -48,15 +45,30 @@ type clientView struct {
 	windowGotoOpen     bool
 	windowGotoInput    string
 	windowGotoDeadline time.Time
+}
+
+type menuKind uint8
+
+const (
+	menuNone menuKind = iota
+	menuHelp
+	menuSettings
+	menuSessions
+	menuLayouts
+)
+
+// These full-screen menus replace each other. Dialogs, copy mode and the
+// timed pane/window pickers retain their independent lifetimes.
+type menuView struct {
+	menu    menuKind
+	helpTop int
 
 	// prefix+s opens a categorized settings page. Option values are shared,
 	// but the cursor and scroll position are local to this client.
-	settingsOpen   bool
 	settingsCursor int
 	settingsTop    int
 
 	// prefix+S opens a session switcher/creator overlay local to this client.
-	sessionsOpen    bool
 	sessionsLoading bool
 	sessionsList    []protocol.SessionInfo
 	sessionsCursor  int
@@ -67,7 +79,6 @@ type clientView struct {
 
 	// prefix+L opens a saved-layout menu local to this client. The layouts
 	// themselves are shared and persisted; only the view state is per-client.
-	layoutsOpen             bool
 	layoutsList             []savedLayout
 	layoutsCursor           int
 	layoutsTop              int
@@ -77,4 +88,9 @@ type clientView struct {
 	layoutsMessage          string
 	layoutsConfirmOverwrite string
 	layoutsConfirmDelete    string
+}
+
+// setMenu starts a fresh menu and releases the previous list and edit state.
+func (v *clientView) setMenu(menu menuKind) {
+	v.menuView = menuView{menu: menu}
 }

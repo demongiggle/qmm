@@ -477,7 +477,7 @@ func TestSelectionDroppedWhenLayoutChanges(t *testing.T) {
 
 func TestSelectActionsSwallowedWhileSettingsOpen(t *testing.T) {
 	s, c := newHelpServer(80, 24)
-	c.settingsOpen = true
+	c.setMenu(menuSettings)
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionSelectStart{X: 1, Y: 1}})
 	if c.selection != nil || c.copyMode != nil {
 		t.Fatal("selection start leaked through the settings modal")

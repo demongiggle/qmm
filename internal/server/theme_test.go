@@ -160,7 +160,7 @@ func TestThemeAppliesToOverlaysAndCopyMode(t *testing.T) {
 	p, _ := theme.Lookup("dracula")
 	ch := chromeForPalette(p)
 
-	help := (&clientView{helpOpen: true}).compose(s.sess, 80, 24, true)
+	help := (&clientView{menuView: menuView{menu: menuHelp}}).compose(s.sess, 80, 24, true)
 	x0, y0, _, _ := helpBox(80, 24)
 	if got, want := cellAt(help, x0, y0).FG, ch.help.border; got != want {
 		t.Errorf("help border FG = %#x, want %#x", got, want)

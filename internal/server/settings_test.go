@@ -34,7 +34,7 @@ func TestPrefixSOpensCategorizedSettings(t *testing.T) {
 	}
 	s, c := newHelpServer(80, 24)
 	fireBinding(s, c, "s")
-	if !c.settingsOpen {
+	if c.menu != menuSettings {
 		t.Fatal("prefix s did not open settings")
 	}
 	if c.frame == nil {
@@ -119,7 +119,7 @@ func TestSettingsNavigationAndAdjustment(t *testing.T) {
 		t.Fatalf("Home cursor = %d, want 0", c.settingsCursor)
 	}
 	s.handleInput(c, []byte("q"))
-	if c.settingsOpen {
+	if c.menu == menuSettings {
 		t.Fatal("q did not close settings")
 	}
 	if text := frameText(*c.frame); strings.Contains(text, "QMM SETTINGS") {
@@ -161,7 +161,7 @@ func TestSettingsPageScrollsOnSmallTerminal(t *testing.T) {
 }
 
 func TestSettingsPageSkipsTooSmallTerminal(t *testing.T) {
-	f := (&clientView{settingsOpen: true}).compose(newTestSession(), 20, 5, true)
+	f := (&clientView{menuView: menuView{menu: menuSettings}}).compose(newTestSession(), 20, 5, true)
 	text := frameText(f)
 	if strings.Contains(text, "QMM SETTINGS") {
 		t.Errorf("settings page covered the terminal-too-small notice:\n%s", text)
@@ -261,7 +261,7 @@ func TestSettingsValuesAffectBehavior(t *testing.T) {
 		}
 		s.opts().setByID(settingCursorShape, 2)
 		s.opts().setByID(settingCursorBlink, 0)
-		f = (&clientView{settingsOpen: true}).compose(s, 80, 24, true)
+		f = (&clientView{menuView: menuView{menu: menuSettings}}).compose(s, 80, 24, true)
 		if f.CursorShape != protocol.CursorShapeBar || !f.CursorBlink {
 			t.Fatalf("configured cursor = shape:%d blink:%v, want blinking bar", f.CursorShape, f.CursorBlink)
 		}
@@ -334,7 +334,7 @@ func TestSettingsInputIsSwallowedAndActionsDismiss(t *testing.T) {
 
 	fireBinding(s, c, "s")
 	s.handleInput(c, []byte("echo should-not-run\n"))
-	if !c.settingsOpen {
+	if c.menu != menuSettings {
 		t.Fatal("unknown key closed the settings page")
 	}
 	raw, err := os.ReadFile(f.Name())
@@ -346,7 +346,7 @@ func TestSettingsInputIsSwallowedAndActionsDismiss(t *testing.T) {
 	}
 
 	s.handleClientMessage(clientMsg{cli: c, msg: protocol.ActionFocus{X: 0, Y: 0}})
-	if c.settingsOpen || w.activePane != 2 {
+	if c.menu == menuSettings || w.activePane != 2 {
 		t.Fatal("mouse focus leaked through the settings page")
 	}
 }
@@ -367,7 +367,7 @@ func TestSettingsOverlayIsPerClientButValuesAreShared(t *testing.T) {
 		t.Error("settings page leaked to another attached client")
 	}
 
-	c2.settingsOpen = true
+	c2.setMenu(menuSettings)
 	c2.forceFull = true
 	s.broadcast()
 	for c1.settingsCursor < settingCursorIndex(t, settingBorderColor) {

@@ -220,3 +220,32 @@ func TestConfigWarningDuringCopyKeepsMouseBlockedUntilBothViewsClose(t *testing.
 		t.Fatalf("blocked click moved focus to pane %d", got)
 	}
 }
+
+func TestBatchedPrefixChordsPreserveMenuLifetimes(t *testing.T) {
+	for _, tc := range []struct {
+		name, chord, top string
+		revealsSessions  bool
+	}{
+		{"copy over sessions", "[", "[copy mode]", true},
+		{"settings replaces sessions", "s", "QMM SETTINGS", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c := newHelpServer(80, 24)
+			input := capturePaneInput(t, s.sess.activePane())
+			// Both prefix chords arrive in one protocol.Input message.
+			sendBehaviorInput(s, c, "\x01S\x01"+tc.chord)
+			if !strings.Contains(frameText(behaviorFrame(t, c)), tc.top) {
+				t.Fatalf("missing top view %q", tc.top)
+			}
+			sendBehaviorInput(s, c, "q")
+			if got := strings.Contains(frameText(behaviorFrame(t, c)), "QMM SESSIONS"); got != tc.revealsSessions {
+				t.Fatalf("sessions visible after closing %s = %t", tc.top, got)
+			}
+			if tc.revealsSessions {
+				sendBehaviorInput(s, c, "q")
+			}
+			sendBehaviorInput(s, c, "live")
+			requirePaneInput(t, input, "live")
+		})
+	}
+}
